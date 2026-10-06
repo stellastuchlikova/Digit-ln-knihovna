@@ -80,7 +80,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ onBookAdded }) => {
         setError('Kniha nebyla nalezena v databázi Google/OpenLibrary. Můžete její údaje vyplnit ručně.');
         setIsFormOpen(true);
       }
-    } catch (err) {
+    } catch {
       setError('Chyba při komunikaci s online databází knih.');
     } finally {
       setIsLoading(false);

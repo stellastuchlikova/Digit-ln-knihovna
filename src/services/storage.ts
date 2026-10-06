@@ -115,7 +115,7 @@ export const importBooksFromJson = async (file: File): Promise<Book[]> => {
         const mergedBooks = Array.from(existingMap.values());
         saveBooks(mergedBooks);
         resolve(mergedBooks);
-      } catch (err) {
+      } catch {
         reject(new Error('Došlo k chybě při zpracování JSON souboru.'));
       }
     };

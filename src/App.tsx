@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import type { Book, ActiveTab } from './types/book';
 import { getStoredBooks, saveBooks } from './services/storage';
 import { BookScanner } from './components/BookScanner';
@@ -6,14 +6,11 @@ import { BookDatabase } from './components/BookDatabase';
 import { ImportExport } from './components/ImportExport';
 import { BookOpen, ScanBarcode, Database, HardDriveDownload } from 'lucide-react';
 
-export const App: React.FC = () => {
-  const [books, setBooks] = useState<Book[]>([]);
-  const [activeTab, setActiveTab] = useState<ActiveTab>('database');
+const CURRENT_YEAR = new Date().getFullYear();
 
-  useEffect(() => {
-    const loaded = getStoredBooks();
-    setBooks(loaded);
-  }, []);
+export const App: React.FC = () => {
+  const [books, setBooks] = useState<Book[]>(getStoredBooks);
+  const [activeTab, setActiveTab] = useState<ActiveTab>('database');
 
   const handleBookAdded = (newBook: Book) => {
     const updated = [newBook, ...books.filter(b => b.id !== newBook.id)];
@@ -126,7 +123,7 @@ export const App: React.FC = () => {
       {/* Footer */}
       <footer className="bg-white border-t border-gray-200 py-4 text-center text-xs text-gray-500">
         <div className="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-2">
-          <p>© {new Date().getFullYear()} Aplikace na čtení a evidenci knih v knihovně</p>
+          <p>© {CURRENT_YEAR} Aplikace na čtení a evidenci knih v knihovně</p>
           <div className="flex items-center space-x-4">
             <span className="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
             <span>Systém připraven</span>

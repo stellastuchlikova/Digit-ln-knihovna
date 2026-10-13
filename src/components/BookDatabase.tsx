@@ -106,21 +106,24 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
-      {/* Top Header & Search Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-gray-200 shadow-xs">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900 flex items-center space-x-2">
-            <span>Knihovní databáze</span>
-            <span className="text-xs bg-[#800020] text-white px-2.5 py-0.5 rounded-full font-semibold">
+      {/* Playful Banner & Top Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-white via-rose-50/30 to-amber-50/30 p-6 rounded-3xl border border-rose-100 shadow-xs">
+        <div className="space-y-1">
+          <div className="flex items-center space-x-2">
+            <span className="text-2xl">📚</span>
+            <h2 className="text-2xl font-black text-gray-900 tracking-tight">
+              Knihovní databáze
+            </h2>
+            <span className="text-xs bg-[#800020] text-white px-3 py-1 rounded-full font-bold shadow-2xs animate-pulse">
               {filteredBooks.length} {filteredBooks.length === 1 ? 'kniha' : filteredBooks.length >= 2 && filteredBooks.length <= 4 ? 'knihy' : 'knih'}
             </span>
-          </h2>
-          <p className="text-xs text-gray-500 mt-1">
-            Kompletní seznam knih s možností vyhledávání, filtrace a správy vypůjčení.
+          </div>
+          <p className="text-xs text-gray-600 font-medium pl-8">
+            Prohlížejte, vyhledávejte a spravujte svou kolekci knih přehledně na jednom místě ✨
           </p>
         </div>
 
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-2.5">
           {/* View Mode Toggle */}
           <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200">
             <button
@@ -305,7 +308,7 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
           {filteredBooks.map(book => (
             <div
               key={book.id}
-              className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-xs hover:shadow-md transition duration-200 flex flex-col justify-between group"
+              className="bg-white border border-gray-200/80 rounded-3xl overflow-hidden shadow-xs hover:shadow-lg hover:-translate-y-1 transition duration-300 flex flex-col justify-between group"
             >
               {/* Cover & Status */}
               <div

@@ -1,4 +1,5 @@
 import type { Book } from '../types/book';
+import { mapCategoriesToPredefinedGenres } from '../constants/genres';
 
 export async function fetchBookByIsbn(isbn: string): Promise<Partial<Book> | null> {
   const cleanIsbn = isbn.replace(/[- ]/g, '').trim();
@@ -15,11 +16,14 @@ export async function fetchBookByIsbn(isbn: string): Promise<Partial<Book> | nul
         // Upgrade http to https for images
         const secureCoverUrl = coverUrl ? coverUrl.replace(/^http:/, 'https:') : undefined;
 
+        const rawCategories = volumeInfo.categories || [];
+        const mappedCategories = mapCategoriesToPredefinedGenres(rawCategories);
+
         return {
           isbn: cleanIsbn,
           title: volumeInfo.title || '',
           authors: volumeInfo.authors || ['Neznámý autor'],
-          categories: volumeInfo.categories || ['Všeobecné'],
+          categories: mappedCategories,
           publishedDate: volumeInfo.publishedDate || '',
           publisher: volumeInfo.publisher || '',
           description: volumeInfo.description || '',
@@ -38,14 +42,15 @@ export async function fetchBookByIsbn(isbn: string): Promise<Partial<Book> | nul
       if (openLibData[bookKey]) {
         const item = openLibData[bookKey];
         const authors = item.authors ? item.authors.map((a: { name: string }) => a.name) : ['Neznámý autor'];
-        const categories = item.subjects ? item.subjects.map((s: { name: string }) => s.name).slice(0, 3) : ['Všeobecné'];
+        const rawCategories = item.subjects ? item.subjects.map((s: { name: string }) => s.name) : [];
+        const mappedCategories = mapCategoriesToPredefinedGenres(rawCategories);
         const coverUrl = item.cover?.medium || item.cover?.large || item.cover?.small;
 
         return {
           isbn: cleanIsbn,
           title: item.title || '',
           authors,
-          categories,
+          categories: mappedCategories,
           publishedDate: item.publish_date || '',
           publisher: item.publishers ? item.publishers.map((p: { name: string }) => p.name).join(', ') : '',
           description: typeof item.notes === 'string' ? item.notes : '',

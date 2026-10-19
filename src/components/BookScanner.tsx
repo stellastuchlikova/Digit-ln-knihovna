@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import type { Book } from '../types/book';
+import { PREDEFINED_GENRES, DEFAULT_GENRE } from '../constants/genres';
 import { fetchBookByIsbn } from '../services/isbnApi';
 import { BarcodeScanner } from './BarcodeScanner';
+import { BookCover } from './BookCover';
 import { Search, Plus, CheckCircle, AlertCircle, Loader2, BookOpen } from 'lucide-react';
 
 interface BookScannerProps {
@@ -19,7 +21,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ onBookAdded }) => {
     isbn: '',
     title: '',
     authors: [''],
-    categories: [''],
+    categories: [DEFAULT_GENRE],
     publishedDate: '',
     publisher: '',
     description: '',
@@ -50,7 +52,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ onBookAdded }) => {
           isbn: cleanIsbn,
           title: fetchedBook.title || '',
           authors: fetchedBook.authors && fetchedBook.authors.length > 0 ? fetchedBook.authors : [''],
-          categories: fetchedBook.categories && fetchedBook.categories.length > 0 ? fetchedBook.categories : [''],
+          categories: fetchedBook.categories && fetchedBook.categories.length > 0 ? fetchedBook.categories : [DEFAULT_GENRE],
           publishedDate: fetchedBook.publishedDate || '',
           publisher: fetchedBook.publisher || '',
           description: fetchedBook.description || '',
@@ -67,7 +69,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ onBookAdded }) => {
           isbn: cleanIsbn,
           title: '',
           authors: [''],
-          categories: [''],
+          categories: [DEFAULT_GENRE],
           publishedDate: '',
           publisher: '',
           description: '',
@@ -104,7 +106,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ onBookAdded }) => {
       isbn: formData.isbn?.trim() || '',
       title: formData.title.trim(),
       authors: formData.authors?.map(a => a.trim()).filter(Boolean) || ['Neznámý autor'],
-      categories: formData.categories?.map(c => c.trim()).filter(Boolean) || ['Nezařazeno'],
+      categories: formData.categories?.map(c => c.trim()).filter(Boolean) || [DEFAULT_GENRE],
       publishedDate: formData.publishedDate || '',
       publisher: formData.publisher?.trim() || '',
       description: formData.description?.trim() || '',
@@ -126,7 +128,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ onBookAdded }) => {
       isbn: '',
       title: '',
       authors: [''],
-      categories: [''],
+      categories: [DEFAULT_GENRE],
       publishedDate: '',
       publisher: '',
       description: '',
@@ -267,7 +269,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ onBookAdded }) => {
                 isbn: '',
                 title: '',
                 authors: [''],
-                categories: [''],
+                categories: [DEFAULT_GENRE],
                 publishedDate: '',
                 publisher: '',
                 description: '',
@@ -309,24 +311,16 @@ export const BookScanner: React.FC<BookScannerProps> = ({ onBookAdded }) => {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
               {/* Cover Image Preview */}
               <div className="flex flex-col items-center justify-center border border-dashed border-gray-300 rounded-lg p-4 bg-gray-50">
-                {formData.coverUrl ? (
-                  <img
-                    src={formData.coverUrl}
-                    alt="Obálka knihy"
-                    className="max-h-56 object-contain rounded shadow-sm mb-3"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).style.display = 'none';
-                    }}
-                  />
-                ) : (
-                  <div className="w-32 h-44 bg-gray-200 rounded flex flex-col items-center justify-center text-gray-400 mb-3">
-                    <BookOpen className="w-10 h-10 mb-1" />
-                    <span className="text-xs">Bez obálky</span>
-                  </div>
-                )}
+                <BookCover
+                  coverUrl={formData.coverUrl}
+                  title={formData.title || 'Název knihy'}
+                  authors={formData.authors?.filter(Boolean)}
+                  categories={formData.categories?.filter(Boolean)}
+                  className="w-36 h-52 mb-3"
+                />
                 <div className="w-full">
                   <label htmlFor="coverUrl" className="block text-xs font-semibold text-gray-600 mb-1">
-                    URL adresa obálky
+                    URL adresa obálky (volitelné)
                   </label>
                   <input
                     id="coverUrl"
@@ -391,25 +385,29 @@ export const BookScanner: React.FC<BookScannerProps> = ({ onBookAdded }) => {
                   </button>
                 </div>
 
-                {/* Categories / Genres */}
+                {/* Predefined Categories / Genres Selector */}
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 uppercase mb-1">
-                    Žánry / Kategorie
+                    Žánry / Kategorie (Předdefinovaný výběr)
                   </label>
-                  {(formData.categories || ['']).map((cat, idx) => (
+                  {(formData.categories || [DEFAULT_GENRE]).map((cat, idx) => (
                     <div key={idx} className="flex items-center space-x-2 mb-2">
-                      <input
-                        type="text"
+                      <select
                         value={cat}
                         onChange={(e) => handleCategoryChange(idx, e.target.value)}
-                        placeholder="např. Sci-fi, Román, Detektivka"
-                        className="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-400"
-                      />
+                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:ring-2 focus:ring-[#800020]"
+                      >
+                        {PREDEFINED_GENRES.map(genre => (
+                          <option key={genre.id} value={genre.label}>
+                            {genre.label}
+                          </option>
+                        ))}
+                      </select>
                       {(formData.categories?.length || 0) > 1 && (
                         <button
                           type="button"
                           onClick={() => handleRemoveCategory(idx)}
-                          className="text-red-500 hover:text-red-700 text-sm font-bold px-2"
+                          className="text-red-500 hover:text-red-700 text-sm font-bold px-2 cursor-pointer"
                         >
                           ✕
                         </button>
@@ -419,10 +417,10 @@ export const BookScanner: React.FC<BookScannerProps> = ({ onBookAdded }) => {
                   <button
                     type="button"
                     onClick={handleAddCategory}
-                    className="text-xs font-medium text-[#800020] hover:underline flex items-center space-x-1"
+                    className="text-xs font-medium text-[#800020] hover:underline flex items-center space-x-1 cursor-pointer"
                   >
                     <Plus className="w-3 h-3" />
-                    <span>Přidat další kategorii</span>
+                    <span>Přidat další žánr</span>
                   </button>
                 </div>
 

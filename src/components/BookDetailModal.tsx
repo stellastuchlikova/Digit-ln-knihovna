@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import type { Book } from '../types/book';
-import { BookOpen, Edit2, Trash2, CheckCircle2, XCircle, Calendar, User, Tag, Hash, Building2 } from 'lucide-react';
+import { PREDEFINED_GENRES, DEFAULT_GENRE } from '../constants/genres';
+import { BookCover } from './BookCover';
+import { BookOpen, Edit2, Trash2, CheckCircle2, XCircle, Calendar, User, Tag, Hash, Building2, Plus } from 'lucide-react';
 
 interface BookDetailModalProps {
   book: Book;
@@ -105,25 +107,64 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ book, onClose,
                 />
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 uppercase mb-1">Autoři (oddělení čárkou)</label>
-                  <input
-                    type="text"
-                    value={editedBook.authors.join(', ')}
-                    onChange={(e) => setEditedBook({ ...editedBook, authors: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
-                    className="w-full p-2 border border-gray-300 rounded-lg text-sm text-gray-900"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 uppercase mb-1">Žánry / Kategorie (čárkou)</label>
-                  <input
-                    type="text"
-                    value={editedBook.categories.join(', ')}
-                    onChange={(e) => setEditedBook({ ...editedBook, categories: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
-                    className="w-full p-2 border border-gray-300 rounded-lg text-sm text-gray-900"
-                  />
-                </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 uppercase mb-1">Autoři (oddělení čárkou)</label>
+                <input
+                  type="text"
+                  value={editedBook.authors.join(', ')}
+                  onChange={(e) => setEditedBook({ ...editedBook, authors: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
+                  className="w-full p-2 border border-gray-300 rounded-lg text-sm text-gray-900"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 uppercase mb-1">
+                  Žánry / Kategorie (Předdefinovaný výběr)
+                </label>
+                {(editedBook.categories.length > 0 ? editedBook.categories : [DEFAULT_GENRE]).map((cat, idx) => (
+                  <div key={idx} className="flex items-center space-x-2 mb-2">
+                    <select
+                      value={cat}
+                      onChange={(e) => {
+                        const updated = [...editedBook.categories];
+                        updated[idx] = e.target.value;
+                        setEditedBook({ ...editedBook, categories: updated });
+                      }}
+                      className="flex-1 p-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white"
+                    >
+                      {PREDEFINED_GENRES.map(genre => (
+                        <option key={genre.id} value={genre.label}>
+                          {genre.label}
+                        </option>
+                      ))}
+                    </select>
+                    {editedBook.categories.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const updated = editedBook.categories.filter((_, i) => i !== idx);
+                          setEditedBook({ ...editedBook, categories: updated });
+                        }}
+                        className="text-red-500 hover:text-red-700 text-sm font-bold px-2 cursor-pointer"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditedBook({
+                      ...editedBook,
+                      categories: [...editedBook.categories, DEFAULT_GENRE]
+                    });
+                  }}
+                  className="text-xs font-medium text-[#800020] hover:underline flex items-center space-x-1 cursor-pointer"
+                >
+                  <Plus className="w-3 h-3" />
+                  <span>Přidat další žánr</span>
+                </button>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -198,21 +239,14 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ book, onClose,
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {/* Book Cover */}
                 <div className="flex flex-col items-center">
-                  {book.coverUrl ? (
-                    <img
-                      src={book.coverUrl}
-                      alt={book.title}
-                      className="max-h-64 object-contain rounded-lg shadow-md border border-gray-200"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = 'none';
-                      }}
-                    />
-                  ) : (
-                    <div className="w-36 h-52 bg-gray-100 border border-gray-200 rounded-lg flex flex-col items-center justify-center text-gray-400">
-                      <BookOpen className="w-12 h-12 mb-2 text-gray-300" />
-                      <span className="text-xs">Bez obálky</span>
-                    </div>
-                  )}
+                  <BookCover
+                    coverUrl={book.coverUrl}
+                    title={book.title}
+                    authors={book.authors}
+                    categories={book.categories}
+                    className="w-44 h-64 shadow-md"
+                    size="lg"
+                  />
 
                   {/* Status Badge */}
                   <div className="mt-4 w-full">

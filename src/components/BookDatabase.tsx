@@ -1,9 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import type { Book, ViewMode, BookFilter } from '../types/book';
+import { PREDEFINED_GENRES } from '../constants/genres';
 import { BookDetailModal } from './BookDetailModal';
+import { BookCover } from './BookCover';
 import {
   Search, Filter, LayoutGrid, List, CheckCircle2, XCircle,
-  Trash2, Eye, User, Tag, BookOpen, ArrowUpDown
+  Trash2, Eye, User, Tag, BookOpen, ArrowUpDown, Sparkles
 } from 'lucide-react';
 
 interface BookDatabaseProps {
@@ -33,15 +35,29 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
   const [sortBy, setSortBy] = useState<'title' | 'author' | 'addedAt'>('addedAt');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
-  // Derive unique categories and authors
-  const categories = useMemo(() => {
+  // Derive category counts for predefined genres & any existing custom genres
+  const genreCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    books.forEach(b => {
+      b.categories.forEach(c => {
+        if (c.trim()) {
+          counts[c.trim()] = (counts[c.trim()] || 0) + 1;
+        }
+      });
+    });
+    return counts;
+  }, [books]);
+
+  // Derive unique categories for filter select dropdown
+  const categoriesList = useMemo(() => {
     const set = new Set<string>();
+    PREDEFINED_GENRES.forEach(g => set.add(g.label));
     books.forEach(b => {
       b.categories.forEach(c => {
         if (c.trim()) set.add(c.trim());
       });
     });
-    return Array.from(set).sort();
+    return Array.from(set);
   }, [books]);
 
   const authors = useMemo(() => {
@@ -159,6 +175,68 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
         </div>
       </div>
 
+      {/* Visual Genre Tab / Card Selector */}
+      <div className="bg-white p-4 rounded-3xl border border-gray-200/90 shadow-xs space-y-3">
+        <div className="flex items-center justify-between px-1">
+          <div className="flex items-center space-x-2 text-xs font-bold uppercase tracking-wider text-gray-500">
+            <Sparkles className="w-4 h-4 text-[#800020]" />
+            <span>Kategorie & Žánry</span>
+          </div>
+          {filters.selectedCategory && (
+            <button
+              onClick={() => setFilters({ ...filters, selectedCategory: '' })}
+              className="text-xs font-semibold text-[#800020] hover:underline cursor-pointer"
+            >
+              Zobrazit všechny žánry
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center space-x-2 overflow-x-auto pb-2 scrollbar-thin">
+          <button
+            onClick={() => setFilters({ ...filters, selectedCategory: '' })}
+            className={`flex-shrink-0 px-3.5 py-2.5 rounded-2xl border text-xs font-bold transition duration-200 flex items-center space-x-2 cursor-pointer ${
+              !filters.selectedCategory
+                ? 'bg-[#800020] text-white border-[#800020] shadow-sm'
+                : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+            }`}
+          >
+            <span>📚 Všechny žánry</span>
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${!filters.selectedCategory ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-700'}`}>
+              {books.length}
+            </span>
+          </button>
+
+          {PREDEFINED_GENRES.map(genre => {
+            const count = genreCounts[genre.label] || 0;
+            const isSelected = filters.selectedCategory === genre.label;
+
+            return (
+              <button
+                key={genre.id}
+                onClick={() => setFilters({ ...filters, selectedCategory: isSelected ? '' : genre.label })}
+                className={`flex-shrink-0 px-3.5 py-2.5 rounded-2xl border text-xs font-bold transition duration-200 flex items-center space-x-2 cursor-pointer ${
+                  isSelected
+                    ? 'bg-[#800020] text-white border-[#800020] shadow-sm'
+                    : 'bg-white text-gray-800 border-gray-200 hover:border-rose-300 hover:bg-rose-50/40'
+                }`}
+              >
+                <span>{genre.emoji} {genre.name}</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                  isSelected
+                    ? 'bg-white/20 text-white'
+                    : count > 0
+                    ? 'bg-rose-100 text-[#800020]'
+                    : 'bg-gray-100 text-gray-400'
+                }`}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Filter Controls Bar */}
       <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-xs space-y-4">
         {/* Search input */}
@@ -185,8 +263,8 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
               onChange={(e) => setFilters({ ...filters, selectedCategory: e.target.value })}
               className="w-full p-2 border border-gray-300 rounded-lg text-xs text-gray-900 bg-white"
             >
-              <option value="">Všechny žánry ({categories.length})</option>
-              {categories.map((cat, idx) => (
+              <option value="">Všechny žánry ({categoriesList.length})</option>
+              {categoriesList.map((cat, idx) => (
                 <option key={idx} value={cat}>
                   {cat}
                 </option>
@@ -312,34 +390,26 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
             >
               {/* Cover & Status */}
               <div
-                className="relative bg-gray-50 border-b border-gray-100 flex items-center justify-center p-4 cursor-pointer min-h-[220px]"
+                className="relative bg-gray-50 border-b border-gray-100 flex items-center justify-center p-4 cursor-pointer min-h-[230px]"
                 onClick={() => setSelectedBook(book)}
               >
-                {book.coverUrl ? (
-                  <img
-                    src={book.coverUrl}
-                    alt={book.title}
-                    className="max-h-48 object-contain rounded shadow-xs group-hover:scale-105 transition duration-200"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).style.display = 'none';
-                    }}
-                  />
-                ) : (
-                  <div className="w-28 h-40 bg-gray-200 rounded flex flex-col items-center justify-center text-gray-400">
-                    <BookOpen className="w-10 h-10 mb-1" />
-                    <span className="text-[10px]">Bez obálky</span>
-                  </div>
-                )}
+                <BookCover
+                  coverUrl={book.coverUrl}
+                  title={book.title}
+                  authors={book.authors}
+                  categories={book.categories}
+                  className="w-32 h-48 shadow-xs group-hover:scale-105 transition duration-200"
+                />
 
                 {/* Status Badge */}
-                <div className="absolute top-3 right-3">
+                <div className="absolute top-3 right-3 z-20">
                   {book.isAvailable ? (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs">
                       <CheckCircle2 className="w-3 h-3 mr-1" />
                       Dostupná
                     </span>
                   ) : (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-[#800020] border border-rose-300">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-[#800020] border border-rose-300 shadow-2xs">
                       <XCircle className="w-3 h-3 mr-1" />
                       Vypůjčená
                     </span>
@@ -433,17 +503,14 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
                   <tr key={book.id} className="hover:bg-gray-50/80 transition">
                     <td className="py-3 px-4 font-semibold text-gray-900">
                       <div className="flex items-center space-x-3">
-                        {book.coverUrl ? (
-                          <img
-                            src={book.coverUrl}
-                            alt=""
-                            className="w-8 h-11 object-contain rounded bg-gray-100 flex-shrink-0"
-                          />
-                        ) : (
-                          <div className="w-8 h-11 bg-gray-100 rounded flex items-center justify-center text-gray-400 flex-shrink-0">
-                            <BookOpen className="w-4 h-4" />
-                          </div>
-                        )}
+                        <BookCover
+                          coverUrl={book.coverUrl}
+                          title={book.title}
+                          authors={book.authors}
+                          categories={book.categories}
+                          className="w-9 h-12 flex-shrink-0 rounded"
+                          size="sm"
+                        />
                         <div>
                           <span
                             onClick={() => setSelectedBook(book)}

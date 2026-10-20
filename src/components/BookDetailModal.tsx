@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import type { Book } from '../types/book';
 import { PREDEFINED_GENRES, DEFAULT_GENRE } from '../constants/genres';
 import { BookCover } from './BookCover';
+import { StarRating } from './StarRating';
 import { BookOpen, Edit2, Trash2, CheckCircle2, XCircle, Calendar, User, Tag, Hash, Building2, Plus } from 'lucide-react';
 
 interface BookDetailModalProps {
@@ -104,6 +105,19 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ book, onClose,
                   value={editedBook.title}
                   onChange={(e) => setEditedBook({ ...editedBook, title: e.target.value })}
                   className="w-full p-2 border border-gray-300 rounded-lg text-sm text-gray-900"
+                />
+              </div>
+
+              {/* Edit Rating */}
+              <div className="p-3 bg-amber-50/50 border border-amber-200/80 rounded-lg">
+                <label className="block text-xs font-bold text-amber-900 uppercase tracking-wider mb-1">
+                  Hodnocení knihy
+                </label>
+                <StarRating
+                  rating={editedBook.rating || 0}
+                  onRatingChange={(r) => setEditedBook({ ...editedBook, rating: r })}
+                  size="lg"
+                  showNumber
                 />
               </div>
 
@@ -272,6 +286,17 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ book, onClose,
                       <User className="w-4 h-4 inline mr-1 text-gray-500" />
                       <span>{book.authors.join(', ') || 'Neznámý autor'}</span>
                     </p>
+                  </div>
+
+                  {/* Rating in Read Mode with quick inline rating change */}
+                  <div className="flex items-center space-x-3 p-3 bg-amber-50/60 border border-amber-200/70 rounded-xl">
+                    <span className="text-xs font-bold text-amber-900 uppercase tracking-wider">Hodnocení:</span>
+                    <StarRating
+                      rating={book.rating || 0}
+                      onRatingChange={(newRating) => onUpdate({ ...book, rating: newRating })}
+                      size="md"
+                      showNumber
+                    />
                   </div>
 
                   <div className="flex flex-wrap gap-2 pt-1">

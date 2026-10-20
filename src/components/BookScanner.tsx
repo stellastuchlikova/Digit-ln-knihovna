@@ -4,6 +4,7 @@ import { PREDEFINED_GENRES, DEFAULT_GENRE } from '../constants/genres';
 import { fetchBookByIsbn } from '../services/isbnApi';
 import { BarcodeScanner } from './BarcodeScanner';
 import { BookCover } from './BookCover';
+import { StarRating } from './StarRating';
 import { Search, Plus, CheckCircle, AlertCircle, Loader2, BookOpen } from 'lucide-react';
 
 interface BookScannerProps {
@@ -27,6 +28,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ onBookAdded }) => {
     description: '',
     coverUrl: '',
     pageCount: undefined,
+    rating: 0,
     isAvailable: true,
     borrowedTo: '',
     notes: ''
@@ -58,6 +60,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ onBookAdded }) => {
           description: fetchedBook.description || '',
           coverUrl: fetchedBook.coverUrl || '',
           pageCount: fetchedBook.pageCount,
+          rating: 0,
           isAvailable: true,
           borrowedTo: '',
           notes: ''
@@ -75,6 +78,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ onBookAdded }) => {
           description: '',
           coverUrl: '',
           pageCount: undefined,
+          rating: 0,
           isAvailable: true,
           borrowedTo: '',
           notes: ''
@@ -112,6 +116,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ onBookAdded }) => {
       description: formData.description?.trim() || '',
       coverUrl: formData.coverUrl?.trim() || '',
       pageCount: formData.pageCount ? Number(formData.pageCount) : undefined,
+      rating: formData.rating || 0,
       isAvailable: formData.isAvailable ?? true,
       borrowedTo: formData.isAvailable ? '' : (formData.borrowedTo?.trim() || ''),
       borrowedAt: formData.isAvailable ? '' : new Date().toISOString(),
@@ -275,6 +280,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ onBookAdded }) => {
                 description: '',
                 coverUrl: '',
                 pageCount: undefined,
+                rating: 0,
                 isAvailable: true,
                 borrowedTo: '',
                 notes: ''
@@ -347,6 +353,19 @@ export const BookScanner: React.FC<BookScannerProps> = ({ onBookAdded }) => {
                     onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                     placeholder="Zadejte název knihy"
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-[#800020] focus:border-[#800020]"
+                  />
+                </div>
+
+                {/* Rating selection */}
+                <div className="p-3 bg-amber-50/50 border border-amber-200/80 rounded-lg">
+                  <label className="block text-xs font-bold text-amber-900 uppercase tracking-wider mb-1">
+                    Vaše hodnocení knihy (volitelné)
+                  </label>
+                  <StarRating
+                    rating={formData.rating || 0}
+                    onRatingChange={(r) => setFormData({ ...formData, rating: r })}
+                    size="lg"
+                    showNumber
                   />
                 </div>
 

@@ -11,6 +11,9 @@ export interface Book {
   pageCount?: number;
   language?: string;
 
+  // Rating (0 - 5 stars)
+  rating?: number;
+
   // Status tracking
   isAvailable: boolean;
   borrowedTo?: string;
@@ -32,4 +35,5 @@ export interface BookFilter {
   selectedCategory: string;
   selectedAuthor: string;
   statusFilter: 'all' | 'available' | 'borrowed';
+  ratingFilter: 'all' | '5' | '4+' | '3+' | 'unrated';
 }

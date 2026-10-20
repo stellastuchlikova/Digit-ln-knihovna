@@ -94,6 +94,7 @@ export const importBooksFromJson = async (file: File): Promise<Book[]> => {
             coverUrl: item.coverUrl || '',
             pageCount: item.pageCount || undefined,
             language: item.language || 'cs',
+            rating: typeof item.rating === 'number' ? item.rating : 0,
             isAvailable: typeof item.isAvailable === 'boolean' ? item.isAvailable : true,
             borrowedTo: item.borrowedTo || '',
             borrowedAt: item.borrowedAt || '',

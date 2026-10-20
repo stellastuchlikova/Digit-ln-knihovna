@@ -3,6 +3,7 @@ import type { Book, ViewMode, BookFilter } from '../types/book';
 import { PREDEFINED_GENRES } from '../constants/genres';
 import { BookDetailModal } from './BookDetailModal';
 import { BookCover } from './BookCover';
+import { StarRating } from './StarRating';
 import {
   Search, Filter, LayoutGrid, List, CheckCircle2, XCircle,
   Trash2, Eye, User, Tag, BookOpen, ArrowUpDown, Sparkles
@@ -29,10 +30,11 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
     searchQuery: '',
     selectedCategory: '',
     selectedAuthor: '',
-    statusFilter: 'all'
+    statusFilter: 'all',
+    ratingFilter: 'all'
   });
 
-  const [sortBy, setSortBy] = useState<'title' | 'author' | 'addedAt'>('addedAt');
+  const [sortBy, setSortBy] = useState<'title' | 'author' | 'addedAt' | 'rating'>('addedAt');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
   // Derive category counts for predefined genres & any existing custom genres
@@ -94,7 +96,16 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
         (filters.statusFilter === 'available' && book.isAvailable) ||
         (filters.statusFilter === 'borrowed' && !book.isAvailable);
 
-      return matchesQuery && matchesCategory && matchesAuthor && matchesStatus;
+      // Rating filter
+      const bookRating = book.rating || 0;
+      const matchesRating =
+        filters.ratingFilter === 'all' ||
+        (filters.ratingFilter === '5' && bookRating === 5) ||
+        (filters.ratingFilter === '4+' && bookRating >= 4) ||
+        (filters.ratingFilter === '3+' && bookRating >= 3) ||
+        (filters.ratingFilter === 'unrated' && bookRating === 0);
+
+      return matchesQuery && matchesCategory && matchesAuthor && matchesStatus && matchesRating;
     }).sort((a, b) => {
       let comparison = 0;
       if (sortBy === 'title') {
@@ -105,6 +116,8 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
         comparison = authorA.localeCompare(authorB, 'cs');
       } else if (sortBy === 'addedAt') {
         comparison = new Date(a.addedAt).getTime() - new Date(b.addedAt).getTime();
+      } else if (sortBy === 'rating') {
+        comparison = (a.rating || 0) - (b.rating || 0);
       }
 
       return sortOrder === 'asc' ? comparison : -comparison;
@@ -116,7 +129,8 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
       searchQuery: '',
       selectedCategory: '',
       selectedAuthor: '',
-      statusFilter: 'all'
+      statusFilter: 'all',
+      ratingFilter: 'all'
     });
   };
 
@@ -252,7 +266,7 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
         </div>
 
         {/* Filters Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-2">
           {/* Category Filter */}
           <div>
             <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1">
@@ -307,6 +321,24 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
             </select>
           </div>
 
+          {/* Rating Filter */}
+          <div>
+            <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1">
+              Hodnocení
+            </label>
+            <select
+              value={filters.ratingFilter}
+              onChange={(e) => setFilters({ ...filters, ratingFilter: e.target.value as BookFilter['ratingFilter'] })}
+              className="w-full p-2 border border-gray-300 rounded-lg text-xs text-gray-900 bg-white"
+            >
+              <option value="all">Všechna hodnocení</option>
+              <option value="5">Pouze 5 hvězdiček (★★★★★)</option>
+              <option value="4+">4 a více hvězdiček (★★★★☆+)</option>
+              <option value="3+">3 a více hvězdiček (★★★☆☆+)</option>
+              <option value="unrated">Zatím nehodnoceno</option>
+            </select>
+          </div>
+
           {/* Sorting */}
           <div>
             <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-1">
@@ -319,6 +351,7 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
                 className="w-full p-2 border border-gray-300 rounded-lg text-xs text-gray-900 bg-white"
               >
                 <option value="addedAt">Nejnověji přidané</option>
+                <option value="rating">Podle hodnocení ★</option>
                 <option value="title">Název (A-Z)</option>
                 <option value="author">Autor (A-Z)</option>
               </select>
@@ -334,7 +367,7 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
         </div>
 
         {/* Active Filters / Reset */}
-        {(filters.searchQuery || filters.selectedCategory || filters.selectedAuthor || filters.statusFilter !== 'all') && (
+        {(filters.searchQuery || filters.selectedCategory || filters.selectedAuthor || filters.statusFilter !== 'all' || filters.ratingFilter !== 'all') && (
           <div className="flex items-center justify-between pt-2 border-t border-gray-100 text-xs text-gray-500">
             <span className="flex items-center space-x-1">
               <Filter className="w-3.5 h-3.5 text-[#800020]" />
@@ -432,6 +465,18 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
                   </p>
                 </div>
 
+                  {/* Rating display / inline rating */}
+                  <div className="flex items-center justify-between py-1 px-2 bg-amber-50/50 rounded-lg border border-amber-100">
+                    <StarRating
+                      rating={book.rating || 0}
+                      onRatingChange={(newRating) => onUpdateBook({ ...book, rating: newRating })}
+                      size="sm"
+                    />
+                    <span className="text-[10px] font-bold text-amber-900">
+                      {book.rating ? `${book.rating}/5` : '—'}
+                    </span>
+                  </div>
+
                 {/* Categories */}
                 <div className="flex flex-wrap gap-1">
                   {book.categories.slice(0, 2).map((cat, idx) => (
@@ -492,6 +537,7 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
                 <tr>
                   <th className="py-3 px-4">Kniha / Název</th>
                   <th className="py-3 px-4">Autor</th>
+                  <th className="py-3 px-4">Hodnocení</th>
                   <th className="py-3 px-4">Žánr</th>
                   <th className="py-3 px-4">ISBN</th>
                   <th className="py-3 px-4">Stav dostupnosti</th>
@@ -529,6 +575,14 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
 
                     <td className="py-3 px-4 font-medium text-gray-800">
                       {book.authors.join(', ') || 'Neznámý'}
+                    </td>
+
+                    <td className="py-3 px-4">
+                      <StarRating
+                        rating={book.rating || 0}
+                        onRatingChange={(newRating) => onUpdateBook({ ...book, rating: newRating })}
+                        size="sm"
+                      />
                     </td>
 
                     <td className="py-3 px-4">

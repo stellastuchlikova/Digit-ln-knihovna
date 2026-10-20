@@ -2,35 +2,47 @@ import type { Book } from '../types/book';
 import { mapCategoriesToPredefinedGenres } from '../constants/genres';
 
 export async function fetchBookByIsbn(isbn: string): Promise<Partial<Book> | null> {
-  const cleanIsbn = isbn.replace(/[- ]/g, '').trim();
+  // Strip non-alphanumeric except X/x for ISBN-10
+  const cleanIsbn = isbn.replace(/[^0-9Xx]/g, '').trim();
   if (!cleanIsbn) return null;
 
+  const parseGoogleBook = (item: any): Partial<Book> => {
+    const volumeInfo = item.volumeInfo || {};
+    const coverUrl = volumeInfo.imageLinks?.thumbnail || volumeInfo.imageLinks?.smallThumbnail;
+    const secureCoverUrl = coverUrl ? coverUrl.replace(/^http:/, 'https:') : undefined;
+    const rawCategories = volumeInfo.categories || [];
+    const mappedCategories = mapCategoriesToPredefinedGenres(rawCategories);
+
+    return {
+      isbn: cleanIsbn,
+      title: volumeInfo.title || '',
+      authors: volumeInfo.authors || ['Neznámý autor'],
+      categories: mappedCategories,
+      publishedDate: volumeInfo.publishedDate || '',
+      publisher: volumeInfo.publisher || '',
+      description: volumeInfo.description || '',
+      coverUrl: secureCoverUrl,
+      pageCount: volumeInfo.pageCount,
+      language: volumeInfo.language || 'cs'
+    };
+  };
+
   try {
-    // 1. Try Google Books API
+    // 1. Try Google Books API with exact isbn:
     const googleRes = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${cleanIsbn}`);
     if (googleRes.ok) {
       const data = await googleRes.json();
       if (data.totalItems > 0 && data.items && data.items.length > 0) {
-        const volumeInfo = data.items[0].volumeInfo;
-        const coverUrl = volumeInfo.imageLinks?.thumbnail || volumeInfo.imageLinks?.smallThumbnail;
-        // Upgrade http to https for images
-        const secureCoverUrl = coverUrl ? coverUrl.replace(/^http:/, 'https:') : undefined;
+        return parseGoogleBook(data.items[0]);
+      }
+    }
 
-        const rawCategories = volumeInfo.categories || [];
-        const mappedCategories = mapCategoriesToPredefinedGenres(rawCategories);
-
-        return {
-          isbn: cleanIsbn,
-          title: volumeInfo.title || '',
-          authors: volumeInfo.authors || ['Neznámý autor'],
-          categories: mappedCategories,
-          publishedDate: volumeInfo.publishedDate || '',
-          publisher: volumeInfo.publisher || '',
-          description: volumeInfo.description || '',
-          coverUrl: secureCoverUrl,
-          pageCount: volumeInfo.pageCount,
-          language: volumeInfo.language || 'cs'
-        };
+    // 1b. Fallback Google Books search without isbn: prefix (e.g. general search for raw string)
+    const googleResGeneral = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${cleanIsbn}`);
+    if (googleResGeneral.ok) {
+      const data = await googleResGeneral.json();
+      if (data.totalItems > 0 && data.items && data.items.length > 0) {
+        return parseGoogleBook(data.items[0]);
       }
     }
 

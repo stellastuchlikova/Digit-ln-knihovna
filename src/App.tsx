@@ -289,7 +289,11 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'scanner' && (
-          <BookScanner onBookAdded={handleBookAdded} />
+          <BookScanner
+            books={books}
+            onBookAdded={handleBookAdded}
+            onBookUpdated={handleBookUpdated}
+          />
         )}
 
         {activeTab === 'import-export' && (
@@ -297,8 +301,43 @@ export const App: React.FC = () => {
         )}
       </main>
 
+      {/* Bottom Navigation Bar for Mobile Devices */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-gray-200 px-3 py-2 flex items-center justify-around shadow-lg">
+        <button
+          onClick={() => setActiveTab('database')}
+          className={`flex flex-col items-center space-y-0.5 cursor-pointer py-1 px-3 rounded-xl transition ${
+            activeTab === 'database' ? 'text-[#800020] font-bold' : 'text-gray-500 hover:text-gray-900'
+          }`}
+        >
+          <Database className="w-5 h-5" />
+          <span className="text-[10px]">Databáze ({books.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('scanner')}
+          className={`flex flex-col items-center space-y-0.5 cursor-pointer py-1 px-3 rounded-xl transition ${
+            activeTab === 'scanner' ? 'text-[#800020] font-bold scale-105' : 'text-gray-500 hover:text-gray-900'
+          }`}
+        >
+          <div className={`p-2 rounded-full ${activeTab === 'scanner' ? 'bg-[#800020] text-white shadow-md' : 'bg-gray-100 text-gray-700'}`}>
+            <ScanBarcode className="w-5 h-5" />
+          </div>
+          <span className="text-[10px]">Fotoaparát</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('import-export')}
+          className={`flex flex-col items-center space-y-0.5 cursor-pointer py-1 px-3 rounded-xl transition ${
+            activeTab === 'import-export' ? 'text-[#800020] font-bold' : 'text-gray-500 hover:text-gray-900'
+          }`}
+        >
+          <HardDriveDownload className="w-5 h-5" />
+          <span className="text-[10px]">Záloha</span>
+        </button>
+      </div>
+
       {/* Footer */}
-      <footer className="bg-white border-t border-gray-200 py-4 text-center text-xs text-gray-500">
+      <footer className="bg-white border-t border-gray-200 py-4 mb-16 md:mb-0 text-center text-xs text-gray-500">
         <div className="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-2">
           <p>© {CURRENT_YEAR} Aplikace na čtení a evidenci knih v knihovně</p>
           <div className="flex items-center space-x-4">

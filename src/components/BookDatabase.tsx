@@ -6,7 +6,7 @@ import { BookCover } from './BookCover';
 import { StarRating } from './StarRating';
 import {
   Search, Filter, LayoutGrid, List, CheckCircle2, XCircle,
-  Trash2, Eye, User, Tag, BookOpen, ArrowUpDown, Sparkles
+  Trash2, Eye, User, Tag, BookOpen, ArrowUpDown, Sparkles, Layers
 } from 'lucide-react';
 
 interface BookDatabaseProps {
@@ -463,6 +463,17 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
                     <User className="w-3 h-3 mr-1 text-gray-400 flex-shrink-0" />
                     <span>{book.authors.join(', ') || 'Neznámý autor'}</span>
                   </p>
+                  {(book.edition || book.publishedDate) && (
+                    <p className="text-[11px] text-gray-500 mt-0.5 flex items-center space-x-1">
+                      {book.edition && (
+                        <span className="font-semibold text-[#800020] flex items-center mr-1">
+                          <Layers className="w-3 h-3 inline mr-0.5" />
+                          {book.edition}
+                        </span>
+                      )}
+                      {book.publishedDate && <span>({book.publishedDate})</span>}
+                    </p>
+                  )}
                 </div>
 
                   {/* Rating display / inline rating */}
@@ -564,11 +575,11 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
                           >
                             {book.title}
                           </span>
-                          {book.publisher && (
-                            <span className="text-[10px] text-gray-400 font-normal">
-                              {book.publisher} ({book.publishedDate || 'N/A'})
-                            </span>
-                          )}
+                          <span className="text-[10px] text-gray-400 font-normal">
+                            {book.edition ? <strong className="text-[#800020] mr-1">[{book.edition}]</strong> : ''}
+                            {book.publisher && `${book.publisher} `}
+                            {book.publishedDate && `(${book.publishedDate})`}
+                          </span>
                         </div>
                       </div>
                     </td>
@@ -653,7 +664,9 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
       {selectedBook && (
         <BookDetailModal
           book={selectedBook}
+          allBooks={books}
           onClose={() => setSelectedBook(null)}
+          onSelectBook={(b) => setSelectedBook(b)}
           onUpdate={(updated) => {
             onUpdateBook(updated);
             setSelectedBook(updated);

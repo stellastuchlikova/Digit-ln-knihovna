@@ -177,6 +177,91 @@ export async function fetchFromKnihovnyCz(isbn: string): Promise<Partial<Book> |
   }
 }
 
+/**
+ * Searches Knihovny.cz and Google Books by query (title or author)
+ * for books that do not have an ISBN.
+ */
+export async function searchBooksByTitleOrAuthor(query: string): Promise<Partial<Book>[]> {
+  const cleanQuery = query.trim();
+  if (!cleanQuery) return [];
+
+  const results: Partial<Book>[] = [];
+
+  // 1. Try Knihovny.cz search by Title
+  try {
+    const params = new URLSearchParams({
+      lookfor: cleanQuery,
+      type: 'AllFields',
+      limit: '5'
+    });
+    for (const field of KNIHOVNY_CZ_FIELDS) {
+      params.append('field[]', field);
+    }
+    const res = await fetch(`https://www.knihovny.cz/api/v1/search?${params.toString()}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.records && Array.isArray(data.records)) {
+        for (const record of data.records) {
+          const isbns = record.isbns || [];
+          const firstIsbn = isbns[0] ? isbns[0].replace(/\([^)]*\)/g, '').replace(/[^0-9Xx]/g, '') : '';
+          const targetIsbn13 = firstIsbn ? toIsbn13(firstIsbn) : '';
+          const parsed = parseKnihovnyCzRecord(record, targetIsbn13);
+          results.push(parsed);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Chyba při vyhledávání v Knihovny.cz:', err);
+  }
+
+  // 2. Try Google Books API by query if fewer than 3 results found
+  if (results.length < 3) {
+    try {
+      const gRes = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(cleanQuery)}&maxResults=5&langRestrict=cs`);
+      if (gRes.ok) {
+        const data = await gRes.json();
+        if (data.items && Array.isArray(data.items)) {
+          for (const item of data.items) {
+            const volumeInfo = item.volumeInfo || {};
+            const industryIdentifiers = volumeInfo.industryIdentifiers || [];
+            const isbnId = industryIdentifiers.find((i: any) => i.type === 'ISBN_13' || i.type === 'ISBN_10');
+            const foundIsbn = isbnId ? toIsbn13(isbnId.identifier) : '';
+
+            const coverUrl = volumeInfo.imageLinks?.thumbnail || volumeInfo.imageLinks?.smallThumbnail;
+            const secureCoverUrl = coverUrl ? coverUrl.replace(/^http:/, 'https:') : undefined;
+            const rawCategories = volumeInfo.categories || [];
+            const mappedCategories = mapCategoriesToPredefinedGenres(rawCategories);
+
+            results.push({
+              isbn: foundIsbn,
+              title: volumeInfo.title || '',
+              authors: volumeInfo.authors || ['Neznámý autor'],
+              categories: mappedCategories,
+              publishedDate: volumeInfo.publishedDate || '',
+              publisher: volumeInfo.publisher || '',
+              description: volumeInfo.description || '',
+              coverUrl: secureCoverUrl,
+              pageCount: volumeInfo.pageCount,
+              language: volumeInfo.language || 'cs'
+            });
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Chyba při vyhledávání v Google Books:', err);
+    }
+  }
+
+  // Deduplicate results by title + author
+  const seen = new Set<string>();
+  return results.filter(b => {
+    const key = `${(b.title || '').toLowerCase()}|${(b.authors || []).join(',').toLowerCase()}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export async function fetchBookByIsbn(isbn: string): Promise<Partial<Book> | null> {
   const cleanIsbn = isbn.replace(/[^0-9Xx]/g, '').trim();
   if (!cleanIsbn) return null;

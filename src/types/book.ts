@@ -10,6 +10,7 @@ export interface Book {
   coverUrl?: string;
   pageCount?: number;
   language?: string;
+  edition?: string; // e.g. "1. vydání", "2. přepracované vydání"
 
   // Rating (0 - 5 stars)
   rating?: number;

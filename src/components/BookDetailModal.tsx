@@ -3,19 +3,36 @@ import type { Book } from '../types/book';
 import { PREDEFINED_GENRES, DEFAULT_GENRE } from '../constants/genres';
 import { BookCover } from './BookCover';
 import { StarRating } from './StarRating';
-import { BookOpen, Edit2, Trash2, CheckCircle2, XCircle, Calendar, User, Tag, Hash, Building2, Plus } from 'lucide-react';
+import { BookOpen, Edit2, Trash2, CheckCircle2, XCircle, Calendar, User, Tag, Hash, Building2, Plus, Layers } from 'lucide-react';
 
 interface BookDetailModalProps {
   book: Book;
+  allBooks?: Book[];
   onClose: () => void;
+  onSelectBook?: (book: Book) => void;
   onUpdate: (updatedBook: Book) => void;
   onDelete: (id: string) => void;
 }
 
-export const BookDetailModal: React.FC<BookDetailModalProps> = ({ book, onClose, onUpdate, onDelete }) => {
+export const BookDetailModal: React.FC<BookDetailModalProps> = ({
+  book,
+  allBooks = [],
+  onClose,
+  onSelectBook,
+  onUpdate,
+  onDelete
+}) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedBook, setEditedBook] = useState<Book>({ ...book });
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  // Find other editions or copies of the same book
+  const otherEditions = allBooks.filter(b => {
+    if (b.id === book.id) return false;
+    const sameTitle = b.title.trim().toLowerCase() === book.title.trim().toLowerCase();
+    const sameAuthor = b.authors.some(a => book.authors.includes(a));
+    return sameTitle || sameAuthor;
+  });
 
   // For quick borrow state change
   const [borrowerName, setBorrowerName] = useState(book.borrowedTo || '');
@@ -181,14 +198,24 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ book, onClose,
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 uppercase mb-1">ISBN</label>
                   <input
                     type="text"
                     value={editedBook.isbn}
                     onChange={(e) => setEditedBook({ ...editedBook, isbn: e.target.value })}
-                    className="w-full p-2 border border-gray-300 rounded-lg text-sm text-gray-900"
+                    className="w-full p-2 border border-gray-300 rounded-lg text-xs text-gray-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 uppercase mb-1">Vydání</label>
+                  <input
+                    type="text"
+                    value={editedBook.edition || ''}
+                    placeholder="např. 1. vydání"
+                    onChange={(e) => setEditedBook({ ...editedBook, edition: e.target.value })}
+                    className="w-full p-2 border border-gray-300 rounded-lg text-xs text-gray-900"
                   />
                 </div>
                 <div>
@@ -197,7 +224,7 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ book, onClose,
                     type="text"
                     value={editedBook.publishedDate || ''}
                     onChange={(e) => setEditedBook({ ...editedBook, publishedDate: e.target.value })}
-                    className="w-full p-2 border border-gray-300 rounded-lg text-sm text-gray-900"
+                    className="w-full p-2 border border-gray-300 rounded-lg text-xs text-gray-900"
                   />
                 </div>
                 <div>
@@ -206,7 +233,7 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ book, onClose,
                     type="text"
                     value={editedBook.publisher || ''}
                     onChange={(e) => setEditedBook({ ...editedBook, publisher: e.target.value })}
-                    className="w-full p-2 border border-gray-300 rounded-lg text-sm text-gray-900"
+                    className="w-full p-2 border border-gray-300 rounded-lg text-xs text-gray-900"
                   />
                 </div>
               </div>
@@ -318,6 +345,12 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ book, onClose,
                         <span><strong>ISBN:</strong> {book.isbn}</span>
                       </div>
                     )}
+                    {book.edition && (
+                      <div className="flex items-center space-x-1">
+                        <Layers className="w-3.5 h-3.5 text-[#800020]" />
+                        <span><strong>Vydání:</strong> {book.edition}</span>
+                      </div>
+                    )}
                     {book.publishedDate && (
                       <div className="flex items-center space-x-1">
                         <Calendar className="w-3.5 h-3.5 text-gray-400" />
@@ -336,6 +369,34 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({ book, onClose,
                       </div>
                     )}
                   </div>
+
+                  {/* Related Editions / Copies in database */}
+                  {otherEditions.length > 0 && (
+                    <div className="p-3 bg-rose-50/60 border border-rose-200/70 rounded-xl space-y-2">
+                      <div className="flex items-center space-x-1.5 text-xs font-bold text-[#800020]">
+                        <Layers className="w-4 h-4" />
+                        <span>Další vydání / výtisky v knihovně ({otherEditions.length})</span>
+                      </div>
+                      <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                        {otherEditions.map(ed => (
+                          <div
+                            key={ed.id}
+                            onClick={() => onSelectBook && onSelectBook(ed)}
+                            className="p-2 bg-white hover:bg-rose-100/50 rounded-lg border border-rose-100 text-xs flex justify-between items-center cursor-pointer transition"
+                          >
+                            <div>
+                              <span className="font-bold text-gray-900">{ed.title}</span>
+                              <span className="text-gray-500 ml-2">
+                                {ed.edition ? `[${ed.edition}] ` : ''}
+                                ({ed.publishedDate || 'rok neudán'})
+                              </span>
+                            </div>
+                            <span className="text-[10px] font-bold text-[#800020]">Zobrazit</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Borrow Management Card */}
                   <div className="p-3 bg-gray-50 border border-gray-200 rounded-xl space-y-2">

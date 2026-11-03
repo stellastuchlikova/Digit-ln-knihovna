@@ -1,4 +1,5 @@
 import type { Book } from '../types/book';
+import { autoClassifyBookGenres } from './databazeKnihApi';
 import { mapCategoriesToPredefinedGenres, DEFAULT_GENRE } from '../constants/genres';
 
 export const KNIHOVNY_CZ_FIELDS = [
@@ -254,22 +255,42 @@ export async function searchBooksByTitleOrAuthor(query: string): Promise<Partial
 
   // Deduplicate results by title + author
   const seen = new Set<string>();
-  return results.filter(b => {
+  const deduplicated = results.filter(b => {
     const key = `${(b.title || '').toLowerCase()}|${(b.authors || []).join(',').toLowerCase()}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
+
+  // Automatically classify genres using Databazeknih.cz taxonomy & heuristics
+  const enrichedResults: Partial<Book>[] = [];
+  for (const item of deduplicated) {
+    const genres = await autoClassifyBookGenres({
+      isbn: item.isbn,
+      title: item.title,
+      authors: item.authors,
+      description: item.description,
+      categories: item.categories
+    });
+    enrichedResults.push({
+      ...item,
+      categories: genres
+    });
+  }
+
+  return enrichedResults;
 }
 
 export async function fetchBookByIsbn(isbn: string): Promise<Partial<Book> | null> {
   const cleanIsbn = isbn.replace(/[^0-9Xx]/g, '').trim();
   if (!cleanIsbn) return null;
 
+  let bookData: Partial<Book> | null = null;
+
   // 1. Primary source: Knihovny.cz API
   const knihovnyCzResult = await fetchFromKnihovnyCz(cleanIsbn);
   if (knihovnyCzResult) {
-    return knihovnyCzResult;
+    bookData = knihovnyCzResult;
   }
 
   // Fallback parsers for Google Books / Open Library
@@ -295,52 +316,74 @@ export async function fetchBookByIsbn(isbn: string): Promise<Partial<Book> | nul
   };
 
   try {
-    // 2. Fallback: Google Books API with exact isbn:
-    const googleRes = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${cleanIsbn}`);
-    if (googleRes.ok) {
-      const data = await googleRes.json();
-      if (data.totalItems > 0 && data.items && data.items.length > 0) {
-        return parseGoogleBook(data.items[0]);
+    if (!bookData) {
+      // 2. Fallback: Google Books API with exact isbn:
+      const googleRes = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${cleanIsbn}`);
+      if (googleRes.ok) {
+        const data = await googleRes.json();
+        if (data.totalItems > 0 && data.items && data.items.length > 0) {
+          bookData = parseGoogleBook(data.items[0]);
+        }
       }
     }
 
-    // 2b. Fallback Google Books search without isbn: prefix
-    const googleResGeneral = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${cleanIsbn}`);
-    if (googleResGeneral.ok) {
-      const data = await googleResGeneral.json();
-      if (data.totalItems > 0 && data.items && data.items.length > 0) {
-        return parseGoogleBook(data.items[0]);
+    if (!bookData) {
+      // 2b. Fallback Google Books search without isbn: prefix
+      const googleResGeneral = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${cleanIsbn}`);
+      if (googleResGeneral.ok) {
+        const data = await googleResGeneral.json();
+        if (data.totalItems > 0 && data.items && data.items.length > 0) {
+          bookData = parseGoogleBook(data.items[0]);
+        }
       }
     }
 
-    // 3. Fallback to Open Library API
-    const openLibRes = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${cleanIsbn}&format=json&jscmd=data`);
-    if (openLibRes.ok) {
-      const openLibData = await openLibRes.json();
-      const bookKey = `ISBN:${cleanIsbn}`;
-      if (openLibData[bookKey]) {
-        const item = openLibData[bookKey];
-        const authors = item.authors ? item.authors.map((a: { name: string }) => a.name) : ['Neznámý autor'];
-        const rawCategories = item.subjects ? item.subjects.map((s: { name: string }) => s.name) : [];
-        const mappedCategories = mapCategoriesToPredefinedGenres(rawCategories);
-        const coverUrl = item.cover?.medium || item.cover?.large || item.cover?.small;
+    if (!bookData) {
+      // 3. Fallback to Open Library API
+      const openLibRes = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${cleanIsbn}&format=json&jscmd=data`);
+      if (openLibRes.ok) {
+        const openLibData = await openLibRes.json();
+        const bookKey = `ISBN:${cleanIsbn}`;
+        if (openLibData[bookKey]) {
+          const item = openLibData[bookKey];
+          const authors = item.authors ? item.authors.map((a: { name: string }) => a.name) : ['Neznámý autor'];
+          const rawCategories = item.subjects ? item.subjects.map((s: { name: string }) => s.name) : [];
+          const mappedCategories = mapCategoriesToPredefinedGenres(rawCategories);
+          const coverUrl = item.cover?.medium || item.cover?.large || item.cover?.small;
 
-        return {
-          isbn: cleanIsbn,
-          title: item.title || '',
-          authors,
-          categories: mappedCategories,
-          publishedDate: item.publish_date || '',
-          publisher: item.publishers ? item.publishers.map((p: { name: string }) => p.name).join(', ') : '',
-          description: typeof item.notes === 'string' ? item.notes : '',
-          coverUrl,
-          pageCount: item.number_of_pages,
-          language: 'cs'
-        };
+          bookData = {
+            isbn: cleanIsbn,
+            title: item.title || '',
+            authors,
+            categories: mappedCategories,
+            publishedDate: item.publish_date || '',
+            publisher: item.publishers ? item.publishers.map((p: { name: string }) => p.name).join(', ') : '',
+            description: typeof item.notes === 'string' ? item.notes : '',
+            coverUrl,
+            pageCount: item.number_of_pages,
+            language: 'cs'
+          };
+        }
       }
     }
 
-    return null;
+    if (!bookData) {
+      return null;
+    }
+
+    // Automatically classify genres with Databazeknih.cz taxonomy & heuristics
+    const classifiedGenres = await autoClassifyBookGenres({
+      isbn: bookData.isbn,
+      title: bookData.title,
+      authors: bookData.authors,
+      description: bookData.description,
+      categories: bookData.categories
+    });
+
+    return {
+      ...bookData,
+      categories: classifiedGenres
+    };
   } catch (error) {
     console.error('Chyba při stahování informací o knize podle ISBN:', error);
     return null;

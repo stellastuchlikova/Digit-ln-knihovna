@@ -1,12 +1,14 @@
 import React, { useMemo, useState } from 'react';
 import type { Book, ViewMode, BookFilter } from '../types/book';
-import { PREDEFINED_GENRES } from '../constants/genres';
+import { PREDEFINED_GENRES, DEFAULT_GENRE } from '../constants/genres';
+import { autoClassifyBookGenres } from '../services/databazeKnihApi';
 import { BookDetailModal } from './BookDetailModal';
 import { BookCover } from './BookCover';
 import { StarRating } from './StarRating';
 import {
   Search, Filter, LayoutGrid, List, CheckCircle2, XCircle,
-  Trash2, Eye, User, Tag, BookOpen, ArrowUpDown, Sparkles, Layers
+  Trash2, Eye, User, Tag, BookOpen, ArrowUpDown, Sparkles, Layers,
+  RefreshCw, Check
 } from 'lucide-react';
 
 interface BookDatabaseProps {
@@ -36,6 +38,10 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
 
   const [sortBy, setSortBy] = useState<'title' | 'author' | 'addedAt' | 'rating'>('addedAt');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+
+  // Auto-classify progress states
+  const [isClassifying, setIsClassifying] = useState(false);
+  const [classifySuccess, setClassifySuccess] = useState<string | null>(null);
 
   // Derive category counts for predefined genres & any existing custom genres
   const genreCounts = useMemo(() => {
@@ -134,6 +140,51 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
     });
   };
 
+  // Auto-classify all or unassigned books using Databazeknih.cz taxonomy
+  const handleAutoClassifyAll = async () => {
+    if (books.length === 0 || isClassifying) return;
+    setIsClassifying(true);
+    setClassifySuccess(null);
+
+    let updatedCount = 0;
+    try {
+      for (const book of books) {
+        // Classify if book has default/empty genre or needs re-mapping
+        const classified = await autoClassifyBookGenres({
+          isbn: book.isbn,
+          title: book.title,
+          authors: book.authors,
+          description: book.description,
+          categories: book.categories
+        });
+
+        const currentGenresStr = (book.categories || []).sort().join('|');
+        const newGenresStr = classified.sort().join('|');
+
+        if (currentGenresStr !== newGenresStr && !(classified.length === 1 && classified[0] === DEFAULT_GENRE && currentGenresStr !== DEFAULT_GENRE)) {
+          onUpdateBook({
+            ...book,
+            categories: classified,
+            updatedAt: new Date().toISOString()
+          });
+          updatedCount++;
+        }
+      }
+
+      setClassifySuccess(
+        updatedCount > 0
+          ? `Úspěšně zařazeno ${updatedCount} ${updatedCount === 1 ? 'kniha' : updatedCount >= 2 && updatedCount <= 4 ? 'knihy' : 'knih'} do žánrů dle Databáze knih!`
+          : 'Všechny knihy již mají přiřazené odpovídající žánry dle Databáze knih.'
+      );
+
+      setTimeout(() => setClassifySuccess(null), 5000);
+    } catch {
+      setClassifySuccess('Nastala chyba při zařazování žánrů.');
+    } finally {
+      setIsClassifying(false);
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
       {/* Playful Banner & Top Header */}
@@ -153,7 +204,20 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center space-x-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Auto-classify button according to Databazeknih.cz */}
+          {books.length > 0 && (
+            <button
+              onClick={handleAutoClassifyAll}
+              disabled={isClassifying}
+              title="Automaticky analyzovat a zařadit knihy do žánrů podle databazeknih.cz"
+              className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100/80 border border-[#800020]/30 text-[#800020] text-xs font-bold rounded-lg shadow-2xs transition flex items-center space-x-1.5 cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isClassifying ? 'animate-spin' : ''}`} />
+              <span>{isClassifying ? 'Zařazuji žánry...' : 'Zařadit žánry dle DK'}</span>
+            </button>
+          )}
+
           {/* View Mode Toggle */}
           <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200">
             <button
@@ -188,6 +252,13 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
           </button>
         </div>
       </div>
+
+      {classifySuccess && (
+        <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl flex items-center space-x-2.5 text-xs font-bold animate-fade-in shadow-2xs">
+          <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+          <span>{classifySuccess}</span>
+        </div>
+      )}
 
       {/* Visual Genre Tab / Card Selector */}
       <div className="bg-white p-4 rounded-3xl border border-gray-200/90 shadow-xs space-y-3">

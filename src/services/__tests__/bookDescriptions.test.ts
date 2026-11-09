@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { findBookDescription, fetchWikipediaSummary, KNOWN_BOOK_DESCRIPTIONS } from '../bookDescriptions';
-import { enrichMissingBookDescriptions, getStoredBooks, saveBooks } from '../storage';
+import { enrichMissingBookDescriptions, enrichStoredBooksOnline, getStoredBooks, saveBooks } from '../storage';
 import type { Book } from '../../types/book';
 
 // Mock localStorage for node environment
@@ -77,6 +77,31 @@ describe('bookDescriptions service', () => {
     expect(res).toBeNull();
     vi.unstubAllGlobals();
   });
+
+  it('prioritizes Knihovny.cz when available', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: any) => {
+      const urlStr = url.toString();
+      if (urlStr.includes('knihovny.cz')) {
+        return new Response(JSON.stringify({
+          resultCount: 1,
+          records: [{
+            id: 'rec1',
+            isbns: ['9788025703670'],
+            summary: ['Anotace děje přímo z portálu Knihovny.cz']
+          }]
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ resultCount: 0 }), { status: 200 });
+    }));
+
+    const desc = await findBookDescription({
+      isbn: '9788025703670',
+      title: 'Kniha test'
+    });
+
+    expect(desc).toBe('Anotace děje přímo z portálu Knihovny.cz');
+    vi.unstubAllGlobals();
+  });
 });
 
 describe('storage description enrichment', () => {
@@ -134,5 +159,48 @@ describe('storage description enrichment', () => {
     saveBooks(sampleBooks);
     const loaded = getStoredBooks();
     expect(loaded[0].description).toBe(KNOWN_BOOK_DESCRIPTIONS['9788025145890']);
+  });
+
+  it('enrichStoredBooksOnline asynchronously enriches missing descriptions', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: any) => {
+      const urlStr = url.toString();
+      if (urlStr.includes('knihovny.cz')) {
+        return new Response(JSON.stringify({
+          resultCount: 1,
+          records: [{
+            id: 'rec-online',
+            isbns: ['9788011223344'],
+            summary: ['Dohledaný online děj z Knihovny.cz']
+          }]
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ resultCount: 0 }), { status: 200 });
+    }));
+
+    const sampleBooks: Book[] = [
+      {
+        id: 'online-1',
+        title: 'Neznámá kniha',
+        authors: ['Neznámý autor'],
+        categories: ['Ostatní'],
+        isbn: '978-80-1122-334-4',
+        description: '',
+        isAvailable: true,
+        addedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }
+    ];
+
+    saveBooks(sampleBooks);
+    let callbackTriggered = false;
+    const { books, updatedCount } = await enrichStoredBooksOnline((updatedBooks) => {
+      callbackTriggered = true;
+      expect(updatedBooks[0].description).toBe('Dohledaný online děj z Knihovny.cz');
+    });
+
+    expect(updatedCount).toBe(1);
+    expect(callbackTriggered).toBe(true);
+    expect(books[0].description).toBe('Dohledaný online děj z Knihovny.cz');
+    vi.unstubAllGlobals();
   });
 });

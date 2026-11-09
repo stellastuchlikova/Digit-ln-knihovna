@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { Book, ActiveTab } from './types/book';
-import { getStoredBooks, saveBooks } from './services/storage';
+import { getStoredBooks, saveBooks, enrichStoredBooksOnline } from './services/storage';
 import { BookScanner } from './components/BookScanner';
 import { BookDatabase } from './components/BookDatabase';
 import { ImportExport } from './components/ImportExport';
@@ -15,6 +15,13 @@ export const App: React.FC = () => {
   const [books, setBooks] = useState<Book[]>(getStoredBooks);
   const [activeTab, setActiveTab] = useState<ActiveTab>('database');
   const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
+
+  // Background enrichment of stored books missing descriptions from Knihovny.cz / online
+  useEffect(() => {
+    enrichStoredBooksOnline((updatedBooks) => {
+      setBooks(updatedBooks);
+    });
+  }, []);
 
   const availableBooksCount = books.filter(b => b.isAvailable).length;
   const borrowedBooksCount = books.filter(b => !b.isAvailable).length;

@@ -1,11 +1,13 @@
 /**
  * Book description and plot enrichment service.
- * Provides curated plot summaries (from Databazeknih.cz and verified Czech literary sources)
- * and online fallback lookups for books loaded by ISBN or title/author.
+ * Integrates Knihovny.cz as primary source for book plot summaries and annotations,
+ * complemented by curated Databazeknih.cz records and Wikipedia / Google Books fallbacks.
  */
 
+import { fetchSummaryFromKnihovnyCz } from './isbnApi';
+
 // Normalized ISBN lookup helper
-function normalizeIsbn(isbn: string): string {
+export function normalizeIsbn(isbn: string): string {
   return isbn.replace(/[^0-9Xx]/g, '').trim();
 }
 
@@ -123,22 +125,36 @@ export async function fetchWikipediaSummary(title: string): Promise<string | nul
 
 /**
  * Retrieves the best available description/plot for a book.
- * Checks:
- * 1. ISBN in curated Databazeknih.cz catalog
- * 2. Title matching in curated Databazeknih.cz catalog
- * 3. Wikipedia Czech summary
+ * Priority order:
+ * 1. Existing valid non-empty description
+ * 2. Knihovny.cz database annotation/summary (by ISBN or Title)
+ * 3. Curated Databazeknih.cz catalog (by ISBN or Title)
+ * 4. Wikipedia Czech summary fallback
  */
 export async function findBookDescription(options: {
   isbn?: string;
   title?: string;
   existingDescription?: string;
 }): Promise<string> {
-  // If an existing valid description is already provided, keep it
+  // 1. If an existing valid description is already provided, keep it
   if (options.existingDescription && options.existingDescription.trim().length > 0) {
     return options.existingDescription.trim();
   }
 
-  // 1. Check curated catalog by ISBN
+  // 2. Query Knihovny.cz database
+  try {
+    const knihovnySummary = await fetchSummaryFromKnihovnyCz({
+      isbn: options.isbn,
+      title: options.title
+    });
+    if (knihovnySummary && knihovnySummary.trim().length > 0) {
+      return knihovnySummary.trim();
+    }
+  } catch {
+    // continue to fallbacks if Knihovny.cz is unreachable
+  }
+
+  // 3a. Check curated catalog by ISBN (Databazeknih.cz)
   if (options.isbn) {
     const clean = normalizeIsbn(options.isbn);
     if (clean && KNOWN_BOOK_DESCRIPTIONS[clean]) {
@@ -146,7 +162,7 @@ export async function findBookDescription(options: {
     }
   }
 
-  // 2. Check curated catalog by Title matching
+  // 3b. Check curated catalog by Title matching (Databazeknih.cz)
   if (options.title) {
     for (const [pattern, desc] of TITLE_TO_DESCRIPTION_MAP) {
       if (pattern.test(options.title)) {
@@ -155,7 +171,7 @@ export async function findBookDescription(options: {
     }
   }
 
-  // 3. Fallback: try Wikipedia Czech summary for famous books
+  // 4. Fallback: try Wikipedia Czech summary for famous books
   if (options.title) {
     const wikiSummary = await fetchWikipediaSummary(options.title);
     if (wikiSummary) {

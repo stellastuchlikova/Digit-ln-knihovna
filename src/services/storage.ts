@@ -1,12 +1,71 @@
 import type { Book } from '../types/book';
+import { KNOWN_BOOK_DESCRIPTIONS } from './bookDescriptions';
 
 const STORAGE_KEY = 'library_app_books_v1';
+
+/**
+ * Enriches existing books if their description is missing or empty,
+ * using known descriptions (e.g. from Databazeknih.cz).
+ */
+export const enrichMissingBookDescriptions = (books: Book[]): { books: Book[]; updated: boolean } => {
+  let updated = false;
+  const enriched = books.map(book => {
+    if (book.description && book.description.trim().length > 0) {
+      return book;
+    }
+
+    const cleanIsbn = (book.isbn || '').replace(/[^0-9Xx]/g, '').trim();
+    if (cleanIsbn && KNOWN_BOOK_DESCRIPTIONS[cleanIsbn]) {
+      updated = true;
+      return {
+        ...book,
+        description: KNOWN_BOOK_DESCRIPTIONS[cleanIsbn],
+        updatedAt: new Date().toISOString()
+      };
+    }
+
+    // Check title fallback
+    const titleLower = (book.title || '').toLowerCase();
+    for (const [isbn, desc] of Object.entries(KNOWN_BOOK_DESCRIPTIONS)) {
+      if (
+        (titleLower.includes('gladys') && isbn === '9781576580196') ||
+        (titleLower.includes('rozvod') && isbn === '9788072551637') ||
+        (titleLower.includes('ameri') && isbn === '9788073350406') ||
+        (titleLower.includes('candide') && isbn === '9788073881641') ||
+        (titleLower.includes('stres') && isbn === '9788072552764') ||
+        (titleLower.includes('francouzsk') && isbn === '9788025117286') ||
+        (titleLower.includes('copywriting') && isbn === '9788025145890') ||
+        (titleLower.includes('chyba') && isbn === '9788072551835') ||
+        (titleLower.includes('jazyk') && isbn === '9788072552597')
+      ) {
+        updated = true;
+        return {
+          ...book,
+          description: desc,
+          updatedAt: new Date().toISOString()
+        };
+      }
+    }
+
+    return book;
+  });
+
+  return { books: enriched, updated };
+};
 
 export const getStoredBooks = (): Book[] => {
   try {
     const data = localStorage.getItem(STORAGE_KEY);
     if (!data) return [];
-    return JSON.parse(data) as Book[];
+    const books = JSON.parse(data) as Book[];
+
+    // Auto-enrich existing loaded books that are missing descriptions
+    const { books: enrichedBooks, updated } = enrichMissingBookDescriptions(books);
+    if (updated) {
+      saveBooks(enrichedBooks);
+    }
+
+    return enrichedBooks;
   } catch (error) {
     console.error('Chyba při načítání knih z LocalStorage:', error);
     return [];
@@ -82,6 +141,7 @@ export const importBooksFromJson = async (file: File): Promise<Book[]> => {
 
         // Validate basic fields
         const validBooks: Book[] = imported.map((item: Partial<Book>, index: number) => {
+          const rawDescription = item.description || '';
           return {
             id: item.id || `imported-${Date.now()}-${index}`,
             isbn: item.isbn || '',
@@ -90,7 +150,7 @@ export const importBooksFromJson = async (file: File): Promise<Book[]> => {
             categories: Array.isArray(item.categories) ? item.categories : (item.categories ? [item.categories] : ['Nezařazeno']),
             publishedDate: item.publishedDate || '',
             publisher: item.publisher || '',
-            description: item.description || '',
+            description: rawDescription,
             coverUrl: item.coverUrl || '',
             pageCount: item.pageCount || undefined,
             language: item.language || 'cs',
@@ -105,11 +165,14 @@ export const importBooksFromJson = async (file: File): Promise<Book[]> => {
           };
         });
 
+        // Auto-enrich any imported books missing descriptions
+        const { books: enrichedValidBooks } = enrichMissingBookDescriptions(validBooks);
+
         // Merge with existing books or overwrite? Let's merge without duplicates
         const existingBooks = getStoredBooks();
         const existingMap = new Map(existingBooks.map(b => [b.id, b]));
 
-        validBooks.forEach(book => {
+        enrichedValidBooks.forEach(book => {
           existingMap.set(book.id, book);
         });
 

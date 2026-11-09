@@ -3,7 +3,7 @@ import type { Book } from '../types/book';
 import { PREDEFINED_GENRES, DEFAULT_GENRE } from '../constants/genres';
 import { BookCover } from './BookCover';
 import { StarRating } from './StarRating';
-import { BookOpen, Edit2, Trash2, CheckCircle2, XCircle, Calendar, User, Tag, Hash, Building2, Plus, Layers } from 'lucide-react';
+import { BookOpen, Edit2, Trash2, CheckCircle2, XCircle, Calendar, User, Tag, Hash, Building2, Plus, Layers, FileText, Check, X } from 'lucide-react';
 
 interface BookDetailModalProps {
   book: Book;
@@ -36,6 +36,23 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({
 
   // For quick borrow state change
   const [borrowerName, setBorrowerName] = useState(book.borrowedTo || '');
+
+  // Quick inline plot/description edit state
+  const [isInlineEditingDesc, setIsInlineEditingDesc] = useState(false);
+  const [inlineDescText, setInlineDescText] = useState(book.description || '');
+
+  const handleSaveInlineDesc = () => {
+    onUpdate({
+      ...book,
+      description: inlineDescText.trim()
+    });
+    setIsInlineEditingDesc(false);
+  };
+
+  const handleCancelInlineDesc = () => {
+    setInlineDescText(book.description || '');
+    setIsInlineEditingDesc(false);
+  };
 
   const handleToggleAvailability = () => {
     if (book.isAvailable) {
@@ -438,15 +455,83 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({
                     )}
                   </div>
 
-                  {book.description && (
-                    <div>
-                      <h4 className="text-xs font-bold text-gray-700 uppercase mb-1">Popis / Anotace</h4>
-                      <p className="text-xs text-gray-600 leading-relaxed max-h-40 overflow-y-auto bg-gray-50 p-2.5 rounded-lg border border-gray-100">
-                        {book.description}
-                      </p>
-                    </div>
+                </div>
+              </div>
+
+              {/* Dedicated Plot / Book Description Section */}
+              <div className="bg-rose-50/40 border border-[#800020]/20 rounded-2xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <FileText className="w-4 h-4 text-[#800020]" />
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-[#800020]">
+                      Stručný popis děje a anotace knihy
+                    </h4>
+                  </div>
+                  {!isInlineEditingDesc && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setInlineDescText(book.description || '');
+                        setIsInlineEditingDesc(true);
+                      }}
+                      className="text-xs text-[#800020] hover:text-[#660019] hover:underline flex items-center space-x-1 font-semibold cursor-pointer"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                      <span>{book.description ? 'Upravit popis' : 'Přidat popis'}</span>
+                    </button>
                   )}
                 </div>
+
+                {isInlineEditingDesc ? (
+                  <div className="space-y-2">
+                    <textarea
+                      rows={4}
+                      value={inlineDescText}
+                      onChange={(e) => setInlineDescText(e.target.value)}
+                      placeholder="Sem zadejte stručný popis děje knihy..."
+                      className="w-full p-2.5 bg-white border border-rose-300 rounded-xl text-xs text-gray-900 focus:ring-2 focus:ring-[#800020] leading-relaxed"
+                    />
+                    <div className="flex justify-end space-x-2">
+                      <button
+                        type="button"
+                        onClick={handleCancelInlineDesc}
+                        className="px-3 py-1.5 border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 rounded-lg text-xs font-medium flex items-center space-x-1 cursor-pointer"
+                      >
+                        <X className="w-3 h-3" />
+                        <span>Zrušit</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSaveInlineDesc}
+                        className="px-3 py-1.5 bg-[#800020] hover:bg-[#660019] text-white rounded-lg text-xs font-bold flex items-center space-x-1 cursor-pointer shadow-xs"
+                      >
+                        <Check className="w-3 h-3" />
+                        <span>Uložit popis děje</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : book.description ? (
+                  <p className="text-xs sm:text-sm text-gray-700 leading-relaxed bg-white/80 p-3.5 rounded-xl border border-rose-100/80 whitespace-pre-line shadow-2xs">
+                    {book.description}
+                  </p>
+                ) : (
+                  <div className="bg-white/60 border border-dashed border-rose-200 rounded-xl p-3.5 text-center">
+                    <p className="text-xs text-gray-500 italic mb-2">
+                      K této knize zatím nebyl přidán žádný popis děje.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setInlineDescText('');
+                        setIsInlineEditingDesc(true);
+                      }}
+                      className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-[#800020] text-xs font-bold rounded-lg cursor-pointer inline-flex items-center space-x-1"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Přidat stručný popis děje</span>
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Action Buttons */}

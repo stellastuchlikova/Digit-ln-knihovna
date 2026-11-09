@@ -3,7 +3,8 @@ import type { Book } from '../types/book';
 import { PREDEFINED_GENRES, DEFAULT_GENRE } from '../constants/genres';
 import { BookCover } from './BookCover';
 import { StarRating } from './StarRating';
-import { BookOpen, Edit2, Trash2, CheckCircle2, XCircle, Calendar, User, Tag, Hash, Building2, Plus, Layers, FileText, Check, X } from 'lucide-react';
+import { BookOpen, Edit2, Trash2, CheckCircle2, XCircle, Calendar, User, Tag, Hash, Building2, Plus, Layers, FileText, Check, X, Search, Loader2 } from 'lucide-react';
+import { findBookDescription } from '../services/bookDescriptions';
 
 interface BookDetailModalProps {
   book: Book;
@@ -40,6 +41,35 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({
   // Quick inline plot/description edit state
   const [isInlineEditingDesc, setIsInlineEditingDesc] = useState(false);
   const [inlineDescText, setInlineDescText] = useState(book.description || '');
+  const [isSearchingPlot, setIsSearchingPlot] = useState(false);
+  const [searchPlotMessage, setSearchPlotMessage] = useState<string | null>(null);
+
+  const handleFetchOnlineDescription = async () => {
+    setIsSearchingPlot(true);
+    setSearchPlotMessage(null);
+    try {
+      const found = await findBookDescription({
+        isbn: book.isbn,
+        title: book.title,
+        existingDescription: '' // force search
+      });
+
+      if (found && found.trim().length > 0) {
+        setInlineDescText(found.trim());
+        onUpdate({
+          ...book,
+          description: found.trim()
+        });
+        setSearchPlotMessage('Popis byl úspěšně dohledán v databázi Knihovny.cz!');
+      } else {
+        setSearchPlotMessage('V databázi Knihovny.cz ani v dalších zdrojích nebyla anotace nalezena.');
+      }
+    } catch {
+      setSearchPlotMessage('Chyba při komunikaci s databází.');
+    } finally {
+      setIsSearchingPlot(false);
+    }
+  };
 
   const handleSaveInlineDesc = () => {
     onUpdate({
@@ -460,27 +490,54 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({
 
               {/* Dedicated Plot / Book Description Section */}
               <div className="bg-rose-50/40 border border-[#800020]/20 rounded-2xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center space-x-2">
                     <FileText className="w-4 h-4 text-[#800020]" />
                     <h4 className="text-xs font-bold uppercase tracking-wider text-[#800020]">
                       Stručný popis děje a anotace knihy
                     </h4>
                   </div>
-                  {!isInlineEditingDesc && (
+                  <div className="flex items-center space-x-2">
                     <button
                       type="button"
-                      onClick={() => {
-                        setInlineDescText(book.description || '');
-                        setIsInlineEditingDesc(true);
-                      }}
-                      className="text-xs text-[#800020] hover:text-[#660019] hover:underline flex items-center space-x-1 font-semibold cursor-pointer"
+                      onClick={handleFetchOnlineDescription}
+                      disabled={isSearchingPlot}
+                      className="text-xs text-rose-700 hover:text-[#800020] bg-rose-100/60 hover:bg-rose-100 px-2.5 py-1 rounded-lg border border-rose-200 flex items-center space-x-1 font-medium cursor-pointer transition disabled:opacity-50"
+                      title="Dohledat děj v Knihovny.cz a online databázích"
                     >
-                      <Edit2 className="w-3.5 h-3.5" />
-                      <span>{book.description ? 'Upravit popis' : 'Přidat popis'}</span>
+                      {isSearchingPlot ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Hledám v Knihovny.cz...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Search className="w-3.5 h-3.5" />
+                          <span>Dohledat děj v Knihovny.cz</span>
+                        </>
+                      )}
                     </button>
-                  )}
+                    {!isInlineEditingDesc && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setInlineDescText(book.description || '');
+                          setIsInlineEditingDesc(true);
+                        }}
+                        className="text-xs text-[#800020] hover:text-[#660019] hover:underline flex items-center space-x-1 font-semibold cursor-pointer"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                        <span>{book.description ? 'Upravit popis' : 'Přidat popis'}</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
+
+                {searchPlotMessage && (
+                  <div className="text-xs px-3 py-1.5 rounded-lg bg-rose-100/80 text-rose-900 border border-rose-200">
+                    {searchPlotMessage}
+                  </div>
+                )}
 
                 {isInlineEditingDesc ? (
                   <div className="space-y-2">

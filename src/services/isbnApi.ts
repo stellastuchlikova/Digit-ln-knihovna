@@ -13,7 +13,10 @@ export const KNIHOVNY_CZ_FIELDS = [
   'isbns',
   'issns',
   'cnb',
-  'formats'
+  'formats',
+  'summary',
+  'description',
+  'notes'
 ];
 
 /**
@@ -44,6 +47,53 @@ export function toIsbn13(isbn: string): string {
 export function cleanCatalogText(text?: string): string {
   if (!text) return '';
   return text.trim().replace(/[/:,;\s]+$/, '').trim();
+}
+
+/**
+ * Cleans annotation text / description from Knihovny.cz records:
+ * strips HTML tags, replaces multiple whitespace/newlines, trims.
+ */
+export function cleanDescriptionText(raw?: string | string[]): string {
+  if (!raw) return '';
+  const text = Array.isArray(raw) ? raw.join('\n\n') : raw;
+  if (!text || typeof text !== 'string') return '';
+
+  return text
+    .replace(/<[^>]+>/g, '') // strip HTML tags
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\r\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
+ * Extracts description/summary from Knihovny.cz record.
+ * Checks summary, description, and notes fields.
+ */
+export function extractDescriptionFromKnihovnyRecord(record: any): string {
+  if (!record) return '';
+
+  if (record.summary) {
+    const cleaned = cleanDescriptionText(record.summary);
+    if (cleaned.length > 0) return cleaned;
+  }
+
+  if (record.description) {
+    const cleaned = cleanDescriptionText(record.description);
+    if (cleaned.length > 0) return cleaned;
+  }
+
+  if (record.notes) {
+    const cleaned = cleanDescriptionText(record.notes);
+    if (cleaned.length > 0) return cleaned;
+  }
+
+  return '';
 }
 
 /**
@@ -105,6 +155,7 @@ export function parseKnihovnyCzRecord(record: any, targetIsbn13: string): Partia
 
   const publishedDate = parseYearFromPublicationDates(record.publicationDates);
   const pageCount = parsePageCountFromPhysicalDescriptions(record.physicalDescriptions);
+  const description = extractDescriptionFromKnihovnyRecord(record);
 
   return {
     isbn: targetIsbn13,
@@ -113,7 +164,7 @@ export function parseKnihovnyCzRecord(record: any, targetIsbn13: string): Partia
     categories: [DEFAULT_GENRE],
     publishedDate,
     publisher,
-    description: '',
+    description,
     coverUrl: undefined,
     pageCount,
     language: 'cs'
@@ -176,6 +227,62 @@ export async function fetchFromKnihovnyCz(isbn: string): Promise<Partial<Book> |
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+/**
+ * Fetches book plot / summary from Knihovny.cz database.
+ * First tries ISBN lookup; if missing or unsuccessful, searches by book title.
+ */
+export async function fetchSummaryFromKnihovnyCz(options: {
+  isbn?: string;
+  title?: string;
+}): Promise<string | null> {
+  const { isbn, title } = options;
+
+  // 1. Try by ISBN
+  if (isbn) {
+    const isbn13 = toIsbn13(isbn);
+    if (isbn13) {
+      try {
+        const book = await fetchFromKnihovnyCz(isbn13);
+        if (book?.description && book.description.trim().length > 0) {
+          return book.description.trim();
+        }
+      } catch {
+        // continue to title search if failed
+      }
+    }
+  }
+
+  // 2. Try by title
+  const cleanTitle = title?.trim();
+  if (cleanTitle) {
+    try {
+      const params = new URLSearchParams({
+        lookfor: cleanTitle,
+        type: 'Title',
+        limit: '5'
+      });
+      for (const field of KNIHOVNY_CZ_FIELDS) {
+        params.append('field[]', field);
+      }
+      const res = await fetch(`https://www.knihovny.cz/api/v1/search?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        const records = data.records || [];
+        for (const record of records) {
+          const desc = extractDescriptionFromKnihovnyRecord(record);
+          if (desc && desc.length > 0) {
+            return desc;
+          }
+        }
+      }
+    } catch {
+      // ignore network errors
+    }
+  }
+
+  return null;
 }
 
 /**

@@ -5,8 +5,11 @@ import {
   cleanAuthorName,
   parseYearFromPublicationDates,
   parsePageCountFromPhysicalDescriptions,
+  cleanDescriptionText,
+  extractDescriptionFromKnihovnyRecord,
   parseKnihovnyCzRecord,
-  fetchFromKnihovnyCz
+  fetchFromKnihovnyCz,
+  fetchSummaryFromKnihovnyCz
 } from '../isbnApi';
 
 const sampleApiResponse = {
@@ -27,7 +30,8 @@ const sampleApiResponse = {
       isbns: ["978-80-257-0367-0"],
       issns: [],
       cnb: "cnb002163342",
-      formats: ["0/BOOKS/"]
+      formats: ["0/BOOKS/"],
+      summary: ["<p>Poutavé vyprávění ze staré Provence plné básní a příběhů.</p>"]
     }
   ],
   status: "OK"
@@ -86,6 +90,25 @@ describe('ISBN & Knihovny.cz API utilities', () => {
     });
   });
 
+  describe('cleanDescriptionText & extractDescriptionFromKnihovnyRecord', () => {
+    it('strips html tags and trims description text', () => {
+      expect(cleanDescriptionText('<p>Krásná <b>kniha</b> &amp; příběh.</p>')).toBe('Krásná kniha & příběh.');
+    });
+
+    it('extracts summary array into joined text', () => {
+      const record = {
+        summary: ['První odstavec děje.', 'Druhý odstavec děje.']
+      };
+      expect(extractDescriptionFromKnihovnyRecord(record)).toBe('První odstavec děje.\n\nDruhý odstavec děje.');
+    });
+
+    it('falls back to description or notes if summary is not present', () => {
+      expect(extractDescriptionFromKnihovnyRecord({ description: 'Popis z pole description' })).toBe('Popis z pole description');
+      expect(extractDescriptionFromKnihovnyRecord({ notes: ['Poznámka o ději'] })).toBe('Poznámka o ději');
+      expect(extractDescriptionFromKnihovnyRecord({})).toBe('');
+    });
+  });
+
   describe('parseKnihovnyCzRecord', () => {
     it('correctly maps raw JSON record from Knihovny.cz to Partial<Book>', () => {
       const record = sampleApiResponse.records[0];
@@ -102,11 +125,31 @@ describe('ISBN & Knihovny.cz API utilities', () => {
         categories: ['❓ Ostatní / Nezařazeno'],
         publishedDate: '2011',
         publisher: 'Argo',
-        description: '',
+        description: 'Poutavé vyprávění ze staré Provence plné básní a příběhů.',
         coverUrl: undefined,
         pageCount: 218,
         language: 'cs'
       });
+    });
+  });
+
+  describe('fetchSummaryFromKnihovnyCz', () => {
+    it('fetches summary by ISBN', async () => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify(sampleApiResponse), { status: 200 })
+      );
+
+      const summary = await fetchSummaryFromKnihovnyCz({ isbn: '978-80-257-0367-0' });
+      expect(summary).toBe('Poutavé vyprávění ze staré Provence plné básní a příběhů.');
+    });
+
+    it('fetches summary by title when ISBN is absent', async () => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify(sampleApiResponse), { status: 200 })
+      );
+
+      const summary = await fetchSummaryFromKnihovnyCz({ title: 'Životy slavných a starých provensálských básníků' });
+      expect(summary).toBe('Poutavé vyprávění ze staré Provence plné básní a příběhů.');
     });
   });
 

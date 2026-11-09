@@ -1,11 +1,11 @@
 import type { Book } from '../types/book';
-import { KNOWN_BOOK_DESCRIPTIONS } from './bookDescriptions';
+import { KNOWN_BOOK_DESCRIPTIONS, findBookDescription } from './bookDescriptions';
 
 const STORAGE_KEY = 'library_app_books_v1';
 
 /**
- * Enriches existing books if their description is missing or empty,
- * using known descriptions (e.g. from Databazeknih.cz).
+ * Synchronously enriches existing books if their description is missing or empty,
+ * using immediate known descriptions (e.g. from Databazeknih.cz).
  */
 export const enrichMissingBookDescriptions = (books: Book[]): { books: Book[]; updated: boolean } => {
   let updated = false;
@@ -51,6 +51,55 @@ export const enrichMissingBookDescriptions = (books: Book[]): { books: Book[]; u
   });
 
   return { books: enriched, updated };
+};
+
+/**
+ * Asynchronously enriches stored books missing descriptions from Knihovny.cz and other sources.
+ * If any books get updated, saves them back to LocalStorage and calls onUpdate callback.
+ */
+export const enrichStoredBooksOnline = async (
+  onUpdate?: (updatedBooks: Book[]) => void
+): Promise<{ books: Book[]; updatedCount: number }> => {
+  const currentBooks = getStoredBooks();
+  let updatedCount = 0;
+
+  const enrichedBooks = await Promise.all(
+    currentBooks.map(async (book) => {
+      if (book.description && book.description.trim().length > 0) {
+        return book;
+      }
+
+      try {
+        const desc = await findBookDescription({
+          isbn: book.isbn,
+          title: book.title,
+          existingDescription: book.description
+        });
+
+        if (desc && desc.trim().length > 0) {
+          updatedCount++;
+          return {
+            ...book,
+            description: desc.trim(),
+            updatedAt: new Date().toISOString()
+          };
+        }
+      } catch {
+        // ignore errors for individual books
+      }
+
+      return book;
+    })
+  );
+
+  if (updatedCount > 0) {
+    saveBooks(enrichedBooks);
+    if (onUpdate) {
+      onUpdate(enrichedBooks);
+    }
+  }
+
+  return { books: enrichedBooks, updatedCount };
 };
 
 export const getStoredBooks = (): Book[] => {

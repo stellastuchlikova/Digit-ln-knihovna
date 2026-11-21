@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Html5QrcodeScanner, Html5QrcodeScanType } from 'html5-qrcode';
-import { Camera, FileText, Flashlight, SwitchCamera, Loader2, Sparkles, RefreshCw } from 'lucide-react';
-import { extractIsbnsFromText } from '../services/isbnExtractor';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
+import { Camera, FileText, Flashlight, SwitchCamera, Loader2, ImagePlus, RefreshCw } from 'lucide-react';
+import { extractIsbnsFromText, isValidIsbn10, isValidIsbn13 } from '../services/isbnExtractor';
+import { toIsbn13 } from '../services/isbnApi';
 
 interface BarcodeScannerProps {
   onScanSuccess: (decodedText: string) => void;
@@ -10,198 +11,285 @@ interface BarcodeScannerProps {
 
 export type ScanMode = 'barcode' | 'text_ocr';
 
-export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({ onScanSuccess }) => {
+const BOOK_BARCODE_FORMATS = [
+  Html5QrcodeSupportedFormats.EAN_13,
+  Html5QrcodeSupportedFormats.EAN_8,
+  Html5QrcodeSupportedFormats.UPC_A,
+  Html5QrcodeSupportedFormats.UPC_E,
+  Html5QrcodeSupportedFormats.CODE_128,
+  Html5QrcodeSupportedFormats.ITF
+];
+
+function getValidIsbn(candidate: string): string | null {
+  const fromText = extractIsbnsFromText(candidate)[0];
+  if (fromText) return fromText;
+
+  const cleaned = candidate.replace(/[^0-9Xx]/g, '').toUpperCase();
+  if (/^97[89]/.test(cleaned) && isValidIsbn13(cleaned)) return cleaned;
+  if (isValidIsbn10(cleaned)) return toIsbn13(cleaned);
+  return null;
+}
+
+function cameraErrorMessage(error: unknown): string {
+  const name = error instanceof DOMException ? error.name : '';
+  if (!window.isSecureContext) {
+    return 'Pro přístup ke kameře otevřete aplikaci přes zabezpečený odkaz HTTPS.';
+  }
+  if (!navigator.mediaDevices?.getUserMedia) {
+    return 'Tento prohlížeč nepodporuje přístup ke kameře. Použijte fotku čárového kódu nebo zadejte ISBN ručně.';
+  }
+  if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+    return 'Prohlížeč nemá povolený přístup ke kameře. Povolte kameru v nastavení webu a zkuste to znovu.';
+  }
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+    return 'Kamera nebyla nalezena. Můžete načíst fotku kódu nebo zadat ISBN ručně.';
+  }
+  return 'Kameru se nepodařilo spustit. Zkuste ji povolit v prohlížeči, načíst fotku kódu nebo zadat ISBN ručně.';
+}
+
+export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({ onScanSuccess, onScanError }) => {
   const [scannerStarted, setScannerStarted] = useState(false);
   const [scanMode, setScanMode] = useState<ScanMode>('barcode');
   const [isOcrProcessing, setIsOcrProcessing] = useState(false);
-  const [ocrStatus, setOcrStatus] = useState<string>('');
-  const [ocrError, setOcrError] = useState<string | null>(null);
-
-  // Video stream state for OCR mode
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  const [ocrStatus, setOcrStatus] = useState('');
+  const [scannerError, setScannerError] = useState<string | null>(null);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [torchOn, setTorchOn] = useState(false);
   const [hasTorch, setHasTorch] = useState(false);
-  const [cameraReloadKey, setCameraReloadKey] = useState(0);
 
-  const barcodeScannerRef = useRef<Html5QrcodeScanner | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const barcodeScannerRef = useRef<Html5Qrcode | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const onScanSuccessRef = useRef(onScanSuccess);
+  const onScanErrorRef = useRef(onScanError);
+  const scanHandledRef = useRef(false);
 
-  // Start Barcode Scanner (html5-qrcode)
-  useEffect(() => {
-    if (scannerStarted && scanMode === 'barcode') {
-      const scanner = new Html5QrcodeScanner(
-        'reader',
-        {
-          fps: 10,
-          qrbox: { width: 280, height: 180 },
-          supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
-          rememberLastUsedCamera: true
-        },
-        false
-      );
+  // Keep scanner callbacks stable while the parent form updates during a scan.
+  onScanSuccessRef.current = onScanSuccess;
+  onScanErrorRef.current = onScanError;
 
-      barcodeScannerRef.current = scanner;
-
-      scanner.render(
-        (decodedText) => {
-          onScanSuccess(decodedText);
-          scanner.clear().catch(console.error);
-          setScannerStarted(false);
-        },
-        () => {
-          // ignore frame scan misses
-        }
-      );
-
-      return () => {
-        scanner.clear().catch(console.error);
-      };
-    }
-  }, [scannerStarted, scanMode, onScanSuccess]);
-
-  // Clean up media streams
-  const stopVideoStream = useCallback(() => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => {
-        try {
-          track.stop();
-        } catch {
-          // ignore
-        }
-      });
-      streamRef.current = null;
-    }
+  const reportError = useCallback((message: string) => {
+    setScannerError(message);
+    onScanErrorRef.current?.(message);
   }, []);
 
+  const handleValidIsbn = useCallback((isbn: string) => {
+    if (scanHandledRef.current) return;
+    scanHandledRef.current = true;
+    setScannerError(null);
+    onScanSuccessRef.current(isbn);
+    setScannerStarted(false);
+  }, []);
+
+  const stopVideoStream = useCallback(() => {
+    streamRef.current?.getTracks().forEach(track => track.stop());
+    streamRef.current = null;
+  }, []);
+
+  // Use the back camera by default and only decode book barcode formats.
   useEffect(() => {
-    let isMounted = true;
-    if (scannerStarted && scanMode === 'text_ocr') {
-      const initCamera = async () => {
-        stopVideoStream();
-        try {
-          const constraints: MediaStreamConstraints = {
-            video: {
-              facingMode: { ideal: facingMode },
-              width: { ideal: 1920 },
-              height: { ideal: 1080 }
-            },
-            audio: false
-          };
+    if (!scannerStarted || scanMode !== 'barcode') return;
 
-          const stream = await navigator.mediaDevices.getUserMedia(constraints);
-          if (!isMounted) {
-            stream.getTracks().forEach(t => t.stop());
-            return;
-          }
-          streamRef.current = stream;
+    let cancelled = false;
+    let scanner: Html5Qrcode | null = null;
+    scanHandledRef.current = false;
+    setScannerError(null);
+    setHasTorch(false);
+    setTorchOn(false);
 
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream;
-            videoRef.current.play().catch(console.error);
+    const startScanner = async () => {
+      try {
+        if (!window.isSecureContext) throw new Error('insecure-context');
+        scanner = new Html5Qrcode('reader', { formatsToSupport: BOOK_BARCODE_FORMATS, verbose: false });
+        barcodeScannerRef.current = scanner;
+        await scanner.start(
+          { facingMode: { ideal: facingMode } },
+          {
+            fps: 18,
+            aspectRatio: 1.777,
+            disableFlip: true,
+            qrbox: (width, height) => {
+              const boxWidth = Math.min(Math.round(width * 0.88), 440);
+              const boxHeight = Math.min(Math.round(boxWidth * 0.46), Math.round(height * 0.72), 210);
+              return { width: boxWidth, height: Math.max(boxHeight, 90) };
+            }
+          },
+          (decodedText) => {
+            const isbn = getValidIsbn(decodedText);
+            if (isbn) handleValidIsbn(isbn);
+          },
+          () => {
+            // A frame without a barcode is expected while the camera is searching.
           }
+        );
 
-          // Check torch support
-          const track = stream.getVideoTracks()[0];
-          const capabilities = track.getCapabilities?.() as any;
-          setHasTorch(Boolean(capabilities && capabilities.torch));
-        } catch (err: any) {
-          console.error('Chyba při přístupu k fotoaparátu:', err);
-          if (isMounted) {
-            setOcrError('Nepodařilo se spustit fotoaparát pro čtení textu. Zkontrolujte oprávnění kamery v prohlížeči.');
-          }
+        const capabilities = scanner.getRunningTrackCapabilities() as MediaTrackCapabilities & { torch?: boolean };
+        setHasTorch(Boolean(capabilities?.torch));
+
+        if (cancelled && scanner.isScanning) await scanner.stop();
+      } catch (error) {
+        if (!cancelled) {
+          setScannerStarted(false);
+          reportError(cameraErrorMessage(error));
         }
-      };
+        if (scanner?.isScanning) {
+          try { await scanner.stop(); } catch { /* scanner may already be stopping */ }
+        }
+        try { scanner?.clear(); } catch { /* the view may not have finished mounting */ }
+      }
+    };
 
-      initCamera();
-    } else {
-      stopVideoStream();
-    }
-
+    void startScanner();
     return () => {
-      isMounted = false;
+      cancelled = true;
+      if (scanner) {
+        if (scanner.isScanning) {
+          void scanner.stop().then(() => scanner?.clear()).catch(() => undefined);
+        } else {
+          try { scanner.clear(); } catch { /* already cleared */ }
+        }
+      }
+      if (barcodeScannerRef.current === scanner) barcodeScannerRef.current = null;
+    };
+  }, [scannerStarted, scanMode, facingMode, handleValidIsbn, reportError]);
+
+  // Separate camera stream for reading ISBN text when a barcode is unavailable.
+  useEffect(() => {
+    let cancelled = false;
+    if (!scannerStarted || scanMode !== 'text_ocr') {
+      stopVideoStream();
+      return;
+    }
+    setHasTorch(false);
+    setTorchOn(false);
+
+    const startCamera = async () => {
+      try {
+        if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+          throw new Error('camera-unavailable');
+        }
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: facingMode },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        });
+        if (cancelled) {
+          stream.getTracks().forEach(track => track.stop());
+          return;
+        }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+        }
+        const track = stream.getVideoTracks()[0];
+        const capabilities = track.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean };
+        setHasTorch(Boolean(capabilities?.torch));
+        setScannerError(null);
+      } catch (error) {
+        if (!cancelled) reportError(cameraErrorMessage(error));
+      }
+    };
+
+    void startCamera();
+    return () => {
+      cancelled = true;
       stopVideoStream();
     };
-  }, [scannerStarted, scanMode, facingMode, cameraReloadKey, stopVideoStream]);
+  }, [scannerStarted, scanMode, facingMode, stopVideoStream, reportError]);
 
-  // Toggle Torch on supported devices
   const toggleTorch = async () => {
-    if (!streamRef.current) return;
-    const track = streamRef.current.getVideoTracks()[0];
     try {
-      const newTorchState = !torchOn;
-      await (track as any).applyConstraints({
-        advanced: [{ torch: newTorchState }]
-      });
-      setTorchOn(newTorchState);
-    } catch (err) {
-      console.warn('Torch not supported or failed:', err);
+      const next = !torchOn;
+      const constraints = { advanced: [{ torch: next } as MediaTrackConstraintSet] };
+      const track = streamRef.current?.getVideoTracks()[0];
+      if (track) await track.applyConstraints(constraints);
+      else if (barcodeScannerRef.current?.isScanning) await barcodeScannerRef.current.applyVideoConstraints(constraints);
+      else return;
+      setTorchOn(next);
+    } catch {
+      reportError('Svítilna není dostupná na tomto telefonu.');
     }
   };
 
-  // Flip Camera between back and front
-  const toggleFacingMode = () => {
-    const nextFacing = facingMode === 'environment' ? 'user' : 'environment';
-    setFacingMode(nextFacing);
+  const toggleCamera = () => setFacingMode(current => current === 'environment' ? 'user' : 'environment');
+
+  const recognizeImageText = async (image: File | HTMLCanvasElement): Promise<string | null> => {
+    const { createWorker } = await import('tesseract.js');
+    const worker = await createWorker('eng');
+    try {
+      const result = await worker.recognize(image);
+      return extractIsbnsFromText(result.data.text)[0] ?? null;
+    } finally {
+      await worker.terminate();
+    }
   };
 
-  // Capture frame and run OCR with Tesseract
   const captureAndRecognizeIsbn = async () => {
-    if (!videoRef.current || isOcrProcessing) return;
-
     const video = videoRef.current;
-    if (video.videoWidth === 0 || video.videoHeight === 0) {
-      setOcrError('Fotoaparát se ještě plně neinicializoval. Zkuste to za sekundu.');
+    if (!video || isOcrProcessing) return;
+    if (!video.videoWidth || !video.videoHeight) {
+      reportError('Kamera se ještě spouští. Zkuste to prosím za chvilku.');
       return;
     }
 
     setIsOcrProcessing(true);
-    setOcrStatus('Zachycuji snímek...');
-    setOcrError(null);
+    setOcrStatus('Rozpoznávám vytištěné ISBN…');
+    setScannerError(null);
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const isbn = await recognizeImageText(canvas);
+      if (isbn) handleValidIsbn(isbn);
+      else reportError('ISBN se nepodařilo přečíst. Zkuste lepší světlo, přiblížení nebo načtěte fotku či zadejte kód ručně.');
+    } catch {
+      reportError('Čtení textu se nezdařilo. Zkuste znovu nebo použijte ruční zadání ISBN.');
+    } finally {
+      setIsOcrProcessing(false);
+      setOcrStatus('');
+    }
+  };
+
+  const handleImageSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const image = event.target.files?.[0];
+    event.target.value = '';
+    if (!image) return;
+
+    scanHandledRef.current = false;
+    setIsOcrProcessing(true);
+    setScannerError(null);
+    setOcrStatus('Hledám ISBN na fotce…');
+    let fileScanner: Html5Qrcode | null = null;
+    try {
+      // A captured photo can decode the barcode even when live camera access is blocked.
+      fileScanner = new Html5Qrcode('isbn-file-reader', { formatsToSupport: BOOK_BARCODE_FORMATS, verbose: false });
+      const decoded = await fileScanner.scanFile(image, false);
+      const barcodeIsbn = getValidIsbn(decoded);
+      if (barcodeIsbn) {
+        handleValidIsbn(barcodeIsbn);
+        setIsOcrProcessing(false);
+        setOcrStatus('');
+        return;
+      }
+    } catch {
+      // If there is no readable barcode, try the printed ISBN text below.
+    } finally {
+      try { fileScanner?.clear(); } catch { /* no camera was started */ }
+    }
 
     try {
-      // Create canvas to capture cropped middle region where ISBN is likely positioned
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-
-      const width = video.videoWidth;
-      const height = video.videoHeight;
-      canvas.width = width;
-      canvas.height = height;
-
-      if (ctx) {
-        ctx.drawImage(video, 0, 0, width, height);
-      }
-
-      setOcrStatus('Rozpoznávám text ISBN z fotky...');
-
-      // Dynamic import to keep main bundle light
-      const { createWorker } = await import('tesseract.js');
-      const worker = await createWorker('eng');
-
-      setOcrStatus('Analyzuji znaky...');
-      const ret = await worker.recognize(canvas);
-      const recognizedText = ret.data.text;
-      await worker.terminate();
-
-      setOcrStatus('Vyhledávám kód ISBN...');
-      const extracted = extractIsbnsFromText(recognizedText);
-
-      if (extracted.length > 0) {
-        setOcrStatus(`Nalezeno ISBN: ${extracted[0]}!`);
-        setTimeout(() => {
-          stopVideoStream();
-          setScannerStarted(false);
-          onScanSuccess(extracted[0]);
-        }, 300);
-      } else {
-        setOcrError(
-          'ISBN nebylo na snímku zřetelně rozpoznáno. Zkuste přiblížit text "ISBN", zaostřit nebo použít svítilnu.'
-        );
-      }
-    } catch (err: any) {
-      console.error('Chyba OCR:', err);
-      setOcrError('Došlo k chybě při rozpoznávání textu. Zkuste to prosím znovu.');
+      setOcrStatus('Čtu vytištěný text ISBN…');
+      const textIsbn = await recognizeImageText(image);
+      if (textIsbn) handleValidIsbn(textIsbn);
+      else reportError('Na fotce se nenašel čitelný kód ani platné ISBN. Zkuste jiný úhel nebo zadejte ISBN ručně.');
+    } catch {
+      reportError('Fotku se nepodařilo zpracovat. Zadejte prosím ISBN ručně.');
     } finally {
       setIsOcrProcessing(false);
       setOcrStatus('');
@@ -209,202 +297,123 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({ onScanSuccess })
   };
 
   const handleStopScanning = () => {
-    if (barcodeScannerRef.current) {
-      barcodeScannerRef.current.clear().catch(console.error);
-    }
-    stopVideoStream();
     setScannerStarted(false);
+    setScannerError(null);
+    setTorchOn(false);
+    setHasTorch(false);
   };
 
   return (
-    <div className="w-full max-w-lg mx-auto bg-white border border-gray-200 rounded-2xl p-4 shadow-sm text-center">
-      {/* Mode Switcher Tabs */}
-      <div className="flex bg-gray-100 p-1 rounded-xl mb-4 text-xs font-bold">
-        <button
-          type="button"
-          onClick={() => {
-            if (scannerStarted && scanMode !== 'barcode') {
-              stopVideoStream();
-            }
-            setScanMode('barcode');
-          }}
-          className={`flex-1 py-2 rounded-lg transition duration-150 flex items-center justify-center space-x-1.5 cursor-pointer ${
-            scanMode === 'barcode'
-              ? 'bg-white text-[#800020] shadow-xs'
-              : 'text-gray-600 hover:text-gray-900'
-          }`}
-        >
-          <Camera className="w-3.5 h-3.5" />
-          <span>Čárový kód (EAN/ISBN)</span>
-        </button>
+    <div className="relative w-full max-w-lg mx-auto bg-white border border-gray-200 rounded-2xl p-4 sm:p-5 shadow-sm text-center">
+      <div id="isbn-file-reader" className="absolute left-0 top-0 h-px w-px overflow-hidden opacity-0 pointer-events-none" aria-hidden="true" />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleImageSelected}
+        className="sr-only"
+        aria-label="Vybrat fotku čárového kódu nebo ISBN"
+      />
 
+      <div className="flex bg-gray-100 p-1 rounded-xl mb-4 text-[11px] sm:text-xs font-bold">
         <button
           type="button"
-          onClick={() => {
-            if (scannerStarted && scanMode !== 'text_ocr') {
-              if (barcodeScannerRef.current) {
-                barcodeScannerRef.current.clear().catch(console.error);
-              }
-            }
-            setScanMode('text_ocr');
-          }}
-          className={`flex-1 py-2 rounded-lg transition duration-150 flex items-center justify-center space-x-1.5 cursor-pointer ${
-            scanMode === 'text_ocr'
-              ? 'bg-white text-[#800020] shadow-xs'
-              : 'text-gray-600 hover:text-gray-900'
-          }`}
+          onClick={() => { setScanMode('barcode'); setScannerError(null); }}
+          className={`flex-1 py-2.5 rounded-lg transition flex items-center justify-center gap-1.5 ${scanMode === 'barcode' ? 'bg-white text-[#800020] shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
         >
-          <FileText className="w-3.5 h-3.5" />
-          <span>Čtení ISBN bez kódu (Text / OCR)</span>
+          <Camera className="w-4 h-4" /><span>Čárový kód</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => { setScanMode('text_ocr'); setScannerError(null); }}
+          className={`flex-1 py-2.5 rounded-lg transition flex items-center justify-center gap-1.5 ${scanMode === 'text_ocr' ? 'bg-white text-[#800020] shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+        >
+          <FileText className="w-4 h-4" /><span>Vytištěné ISBN</span>
         </button>
       </div>
 
       {!scannerStarted ? (
-        <div className="py-6 flex flex-col items-center justify-center space-y-4">
-          <div className="w-16 h-16 rounded-full bg-rose-50 text-[#800020] flex items-center justify-center shadow-inner">
-            {scanMode === 'barcode' ? (
-              <Camera className="w-8 h-8" />
-            ) : (
-              <FileText className="w-8 h-8" />
-            )}
+        <div className="py-3 sm:py-5 flex flex-col items-center gap-3">
+          <div className="w-14 h-14 rounded-full bg-rose-50 text-[#800020] flex items-center justify-center">
+            {scanMode === 'barcode' ? <Camera className="w-7 h-7" /> : <FileText className="w-7 h-7" />}
           </div>
           <div>
-            <h3 className="text-base font-bold text-gray-900">
-              {scanMode === 'barcode'
-                ? 'Skenování čárového kódu knihy'
-                : 'Čtení vytištěného ISBN textu (bez kódu)'}
-            </h3>
+            <h3 className="text-sm font-bold text-gray-900">{scanMode === 'barcode' ? 'Naskenujte knihu' : 'Přečtěte ISBN z tiráže'}</h3>
             <p className="text-xs text-gray-500 max-w-xs mt-1 mx-auto leading-relaxed">
               {scanMode === 'barcode'
-                ? 'Naměřte fotoaparát na čárový kód (EAN/ISBN) na zadní straně knihy.'
-                : 'Naměřte fotoaparát na vytištěný text "ISBN: 978-..." v tiráži nebo na zadní straně.'}
+                ? 'Zamiřte zadní kamerou na čárový kód EAN/ISBN. Kód se načte automaticky.'
+                : 'Zamiřte kamerou na vytištěné číslo ISBN-10 nebo ISBN-13 a vyfoťte ho.'}
             </p>
           </div>
           <button
             type="button"
-            onClick={() => setScannerStarted(true)}
-            className="px-6 py-2.5 bg-[#800020] hover:bg-[#660019] text-white text-xs font-bold rounded-xl shadow transition duration-150 flex items-center space-x-2 cursor-pointer active:scale-95"
+            onClick={() => { scanHandledRef.current = false; setScannerError(null); setScannerStarted(true); }}
+            className="w-full sm:w-auto px-6 py-3 bg-[#800020] hover:bg-[#660019] text-white text-sm font-bold rounded-xl shadow transition flex items-center justify-center gap-2 active:scale-[.98]"
           >
-            <Camera className="w-4 h-4" />
-            <span>Spustit mobilní fotoaparát</span>
+            <Camera className="w-4 h-4" /> Spustit zadní kameru
+          </button>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isOcrProcessing}
+            className="w-full sm:w-auto px-5 py-2.5 border border-gray-300 hover:border-[#800020] hover:text-[#800020] disabled:opacity-50 text-gray-700 text-sm font-semibold rounded-xl transition flex items-center justify-center gap-2"
+          >
+            {isOcrProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImagePlus className="w-4 h-4" />}
+            {isOcrProcessing ? (ocrStatus || 'Zpracovávám fotku…') : 'Vyfotit nebo vybrat fotku'}
           </button>
         </div>
       ) : (
         <div className="space-y-3">
-          {/* Header Controls */}
           <div className="flex justify-between items-center px-1">
-            <span className="text-xs font-bold text-gray-700 flex items-center space-x-1">
-              <span className="w-2 h-2 rounded-full bg-rose-600 animate-pulse inline-block mr-1"></span>
-              <span>{scanMode === 'barcode' ? 'Skenování čárového kódu' : 'Čtení textu ISBN'}</span>
+            <span className="text-xs font-bold text-gray-700 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-rose-600 animate-pulse" />
+              {scanMode === 'barcode' ? 'Hledám čárový kód…' : 'Kamera pro vytištěné ISBN'}
             </span>
-
-            <div className="flex items-center space-x-2">
-              {scanMode === 'text_ocr' && hasTorch && (
-                <button
-                  type="button"
-                  onClick={toggleTorch}
-                  className={`p-1.5 rounded-lg border text-xs font-semibold flex items-center space-x-1 cursor-pointer ${
-                    torchOn ? 'bg-amber-100 text-amber-900 border-amber-300' : 'bg-gray-100 text-gray-600 border-gray-200'
-                  }`}
-                  title="Svítilna"
-                >
-                  <Flashlight className="w-3.5 h-3.5" />
+            <div className="flex items-center gap-2">
+              {hasTorch && (
+                <button type="button" onClick={toggleTorch} className={`p-2 rounded-lg border ${torchOn ? 'bg-amber-100 text-amber-900 border-amber-300' : 'bg-gray-100 text-gray-600 border-gray-200'}`} title="Svítilna">
+                  <Flashlight className="w-4 h-4" />
                 </button>
               )}
-
-              {scanMode === 'text_ocr' && (
-                <button
-                  type="button"
-                  onClick={toggleFacingMode}
-                  className="p-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 border border-gray-200 text-gray-700 text-xs font-semibold cursor-pointer"
-                  title="Přepnout přední/zadní kameru"
-                >
-                  <SwitchCamera className="w-3.5 h-3.5" />
-                </button>
-              )}
-
-              <button
-                type="button"
-                onClick={handleStopScanning}
-                className="text-xs text-red-600 hover:text-red-800 font-bold px-2 py-1 rounded-lg border border-red-200 hover:bg-red-50 cursor-pointer"
-              >
-                Zrušit
+              <button type="button" onClick={toggleCamera} className="p-2 rounded-lg bg-gray-100 border border-gray-200 text-gray-700" title="Přepnout přední/zadní kameru">
+                <SwitchCamera className="w-4 h-4" />
               </button>
+              <button type="button" onClick={handleStopScanning} className="text-xs text-red-700 font-bold px-3 py-2 rounded-lg border border-red-200 hover:bg-red-50">Zrušit</button>
             </div>
           </div>
 
-          {/* Barcode Mode Container */}
-          {scanMode === 'barcode' && (
-            <div id="reader" className="w-full overflow-hidden rounded-xl bg-black min-h-[240px]"></div>
-          )}
-
-          {/* Text OCR Mode Video Stream */}
-          {scanMode === 'text_ocr' && (
+          {scanMode === 'barcode' ? (
+            <div className="relative overflow-hidden rounded-xl bg-black">
+              <div id="reader" className="w-full min-h-[220px] sm:min-h-[280px]" />
+              {scannerError && <div className="absolute inset-0 bg-white/95 flex flex-col items-center justify-center gap-3 p-5">
+                <p className="text-sm text-amber-900 font-medium">{scannerError}</p>
+                <button type="button" onClick={() => { scanHandledRef.current = false; setScannerError(null); setScannerStarted(false); window.setTimeout(() => setScannerStarted(true), 0); }} className="px-4 py-2 bg-[#800020] text-white rounded-lg text-sm font-bold flex items-center gap-2"><RefreshCw className="w-4 h-4" />Zkusit znovu</button>
+              </div>}
+            </div>
+          ) : (
             <div className="space-y-3">
-              <div className="relative w-full aspect-4/3 rounded-xl overflow-hidden bg-black flex items-center justify-center">
-                <video
-                  ref={videoRef}
-                  playsInline
-                  muted
-                  className="w-full h-full object-cover"
-                />
-
-                {/* Target box guide */}
-                <div className="absolute inset-x-8 top-1/3 bottom-1/3 border-2 border-dashed border-rose-400 bg-rose-500/10 rounded-lg pointer-events-none flex items-center justify-center">
-                  <div className="bg-black/70 text-white text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center space-x-1">
-                    <Sparkles className="w-2.5 h-2.5 text-rose-300" />
-                    <span>Zamiřte na text "ISBN 978..."</span>
-                  </div>
+              <div className="relative w-full aspect-[4/3] rounded-xl overflow-hidden bg-black">
+                <video ref={videoRef} playsInline muted className="w-full h-full object-cover" />
+                <div className="absolute inset-x-7 top-1/3 bottom-1/3 border-2 border-dashed border-rose-400 bg-rose-500/10 rounded-lg pointer-events-none flex items-center justify-center">
+                  <span className="bg-black/70 text-white text-[11px] px-2 py-1 rounded-full font-bold">Zaměřte ISBN do rámečku</span>
                 </div>
-
-                {isOcrProcessing && (
-                  <div className="absolute inset-0 bg-black/60 backdrop-blur-xs flex flex-col items-center justify-center text-white space-y-2 p-4">
-                    <Loader2 className="w-8 h-8 animate-spin text-rose-400" />
-                    <p className="text-xs font-bold">{ocrStatus || 'Zpracovávám text...'}</p>
-                  </div>
-                )}
+                {isOcrProcessing && <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center text-white gap-2 p-4"><Loader2 className="w-8 h-8 animate-spin text-rose-400" /><p className="text-sm font-bold">{ocrStatus || 'Zpracovávám…'}</p></div>}
               </div>
-
-              {ocrError && (
-                <div className="p-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-xs font-medium text-left">
-                  {ocrError}
-                </div>
-              )}
-
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  disabled={isOcrProcessing}
-                  onClick={captureAndRecognizeIsbn}
-                  className="flex-1 py-3 bg-[#800020] hover:bg-[#660019] disabled:opacity-50 text-white text-xs font-extrabold rounded-xl shadow transition duration-150 flex items-center justify-center space-x-2 cursor-pointer active:scale-98"
-                >
-                  {isOcrProcessing ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Čtu text...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Camera className="w-4 h-4" />
-                      <span>Vyfotit a přečíst ISBN</span>
-                    </>
-                  )}
+              {scannerError && <p className="p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-xs text-left">{scannerError}</p>}
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" disabled={isOcrProcessing} onClick={captureAndRecognizeIsbn} className="py-3 bg-[#800020] hover:bg-[#660019] disabled:opacity-50 text-white text-xs font-bold rounded-xl flex items-center justify-center gap-2">
+                  {isOcrProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
+                  {isOcrProcessing ? 'Čtu ISBN…' : 'Vyfotit a přečíst'}
                 </button>
-
-                <button
-                  type="button"
-                  onClick={() => setCameraReloadKey(k => k + 1)}
-                  disabled={isOcrProcessing}
-                  className="p-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl border border-gray-300 cursor-pointer"
-                  title="Obnovit fotoaparát"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                </button>
+                <button type="button" disabled={isOcrProcessing} onClick={() => fileInputRef.current?.click()} className="py-3 border border-gray-300 hover:border-[#800020] text-gray-700 text-xs font-bold rounded-xl flex items-center justify-center gap-2"><ImagePlus className="w-4 h-4" />Použít fotku</button>
               </div>
             </div>
           )}
         </div>
       )}
+
+      {!scannerStarted && scannerError && <p role="alert" className="mt-3 p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-xs text-left">{scannerError}</p>}
+      <p className="mt-3 text-[11px] leading-relaxed text-gray-500">Když kamera nefunguje, vyberte fotku obálky nebo kódu, případně zadejte ISBN ručně vedle skeneru.</p>
     </div>
   );
 };

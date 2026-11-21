@@ -1,7 +1,7 @@
 {
   "name": "Knihovna – Správa & Čtení knih",
   "short_name": "Knihovna",
-  "description": "Mobilní aplikace pro správu domácí knihovny, skenování čárových kódů i textového ISBN a evidenci výpůjček.",
+  "description": "Mobilní katalog knih pro knihovnu se skenováním ISBN, vyhledáváním a evidencí výpůjček.",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#ffffff",

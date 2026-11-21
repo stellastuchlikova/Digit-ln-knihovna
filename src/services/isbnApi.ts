@@ -2,6 +2,16 @@ import type { Book } from '../types/book';
 import { mapCategoriesToPredefinedGenres, DEFAULT_GENRE } from '../constants/genres';
 import { findBookDescription } from './bookDescriptions';
 
+async function fetchWithTimeout(url: string, timeoutMs = 7000): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 export const KNIHOVNY_CZ_FIELDS = [
   'id',
   'title',
@@ -266,7 +276,7 @@ export async function fetchSummaryFromKnihovnyCz(options: {
       for (const field of KNIHOVNY_CZ_FIELDS) {
         params.append('field[]', field);
       }
-      const res = await fetch(`https://www.knihovny.cz/api/v1/search?${params.toString()}`);
+      const res = await fetchWithTimeout(`https://www.knihovny.cz/api/v1/search?${params.toString()}`);
       if (res.ok) {
         const data = await res.json();
         const records = data.records || [];
@@ -305,7 +315,7 @@ export async function searchBooksByTitleOrAuthor(query: string): Promise<Partial
     for (const field of KNIHOVNY_CZ_FIELDS) {
       params.append('field[]', field);
     }
-    const res = await fetch(`https://www.knihovny.cz/api/v1/search?${params.toString()}`);
+    const res = await fetchWithTimeout(`https://www.knihovny.cz/api/v1/search?${params.toString()}`);
     if (res.ok) {
       const data = await res.json();
       if (data.records && Array.isArray(data.records)) {
@@ -325,7 +335,7 @@ export async function searchBooksByTitleOrAuthor(query: string): Promise<Partial
   // 2. Try Google Books API by query if fewer than 3 results found
   if (results.length < 3) {
     try {
-      const gRes = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(cleanQuery)}&maxResults=5&langRestrict=cs`);
+      const gRes = await fetchWithTimeout(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(cleanQuery)}&maxResults=5&langRestrict=cs`);
       if (gRes.ok) {
         const data = await gRes.json();
         if (data.items && Array.isArray(data.items)) {
@@ -424,7 +434,7 @@ export async function fetchBookByIsbn(isbn: string): Promise<Partial<Book> | nul
   try {
     if (!bookResult) {
       // 2. Fallback: Google Books API with exact isbn:
-      const googleRes = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${cleanIsbn}`);
+      const googleRes = await fetchWithTimeout(`https://www.googleapis.com/books/v1/volumes?q=isbn:${cleanIsbn}`);
       if (googleRes.ok) {
         const data = await googleRes.json();
         if (data.totalItems > 0 && data.items && data.items.length > 0) {
@@ -435,7 +445,7 @@ export async function fetchBookByIsbn(isbn: string): Promise<Partial<Book> | nul
 
     if (!bookResult) {
       // 2b. Fallback Google Books search without isbn: prefix
-      const googleResGeneral = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${cleanIsbn}`);
+      const googleResGeneral = await fetchWithTimeout(`https://www.googleapis.com/books/v1/volumes?q=${cleanIsbn}`);
       if (googleResGeneral.ok) {
         const data = await googleResGeneral.json();
         if (data.totalItems > 0 && data.items && data.items.length > 0) {
@@ -446,7 +456,7 @@ export async function fetchBookByIsbn(isbn: string): Promise<Partial<Book> | nul
 
     if (!bookResult) {
       // 3. Fallback to Open Library API
-      const openLibRes = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${cleanIsbn}&format=json&jscmd=data`);
+      const openLibRes = await fetchWithTimeout(`https://openlibrary.org/api/books?bibkeys=ISBN:${cleanIsbn}&format=json&jscmd=data`);
       if (openLibRes.ok) {
         const openLibData = await openLibRes.json();
         const bookKey = `ISBN:${cleanIsbn}`;

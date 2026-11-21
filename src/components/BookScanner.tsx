@@ -3,6 +3,8 @@ import type { Book } from '../types/book';
 import { PREDEFINED_GENRES, DEFAULT_GENRE } from '../constants/genres';
 import { fetchBookByIsbn, searchBooksByTitleOrAuthor } from '../services/isbnApi';
 import { checkForDuplicates, type DuplicateCheckResult } from '../services/duplicateDetection';
+import { isValidIsbn10, isValidIsbn13, normalizeIsbn } from '../services/isbnExtractor';
+import { toIsbn13 } from '../services/isbnApi';
 import { BarcodeScanner } from './BarcodeScanner';
 import { BookCover } from './BookCover';
 import { StarRating } from './StarRating';
@@ -55,11 +57,17 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onBookAdded, on
 
   // 1. Search by ISBN handler
   const handleSearchByIsbn = async (isbnToSearch: string) => {
-    const cleanIsbn = isbnToSearch.replace(/[- ]/g, '').trim();
-    if (!cleanIsbn) {
-      setError('Zadejte prosím platný kód ISBN.');
+    setSuccessMessage(null);
+    const normalizedIsbn = normalizeIsbn(isbnToSearch);
+    const validIsbn = isValidIsbn10(normalizedIsbn) ||
+      (/^97[89]/.test(normalizedIsbn) && isValidIsbn13(normalizedIsbn));
+    if (!validIsbn) {
+      setError('ISBN je neplatné. Zkontrolujte deset nebo třináct číslic a zkuste to znovu.');
       return;
     }
+
+    const cleanIsbn = toIsbn13(normalizedIsbn);
+    setIsbnInput(cleanIsbn);
 
     setIsLoading(true);
     setError(null);
@@ -67,6 +75,52 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onBookAdded, on
     setSearchResults([]);
 
     try {
+      // Prefer the library's own catalogue. This is instant and also works offline.
+      const localBook = books.find(book => book.isbn && toIsbn13(book.isbn) === cleanIsbn);
+      if (localBook) {
+        setFormData({
+          isbn: localBook.isbn || cleanIsbn,
+          title: localBook.title,
+          authors: localBook.authors?.length ? localBook.authors : [''],
+          categories: localBook.categories?.length ? localBook.categories : [DEFAULT_GENRE],
+          publishedDate: localBook.publishedDate || '',
+          publisher: localBook.publisher || '',
+          edition: localBook.edition || '',
+          description: localBook.description || '',
+          coverUrl: localBook.coverUrl || '',
+          pageCount: localBook.pageCount,
+          rating: localBook.rating || 0,
+          isAvailable: localBook.isAvailable,
+          borrowedTo: localBook.borrowedTo || '',
+          notes: localBook.notes || ''
+        });
+        setSuccessMessage(`„${localBook.title}“ už v katalogu je. Údaje jsou předvyplněné; při přidávání dalšího výtisku zvolte „Přidat jako další kus“.`);
+        setIsFormOpen(true);
+        return;
+      }
+
+      if (!navigator.onLine) {
+        setFormData({
+          isbn: cleanIsbn,
+          title: '',
+          authors: [''],
+          categories: [DEFAULT_GENRE],
+          publishedDate: '',
+          publisher: '',
+          edition: '',
+          description: '',
+          coverUrl: '',
+          pageCount: undefined,
+          rating: 0,
+          isAvailable: true,
+          borrowedTo: '',
+          notes: ''
+        });
+        setError('Jste offline. ISBN se ověřilo, ale údaje z online databází nejsou dostupné. Knihu můžete vyplnit ručně.');
+        setIsFormOpen(true);
+        return;
+      }
+
       const fetchedBook = await fetchBookByIsbn(cleanIsbn);
       if (fetchedBook) {
         setFormData({
@@ -104,7 +158,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onBookAdded, on
           borrowedTo: '',
           notes: ''
         });
-        setError('Kniha nebyla nalezena v online katalozích. Můžete její údaje vyplnit ručně.');
+        setError('Kniha se v online katalozích nenašla nebo nejsou právě dostupné. Údaje můžete doplnit ručně.');
         setIsFormOpen(true);
       }
     } catch {
@@ -121,17 +175,38 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onBookAdded, on
 
     setIsTitleSearching(true);
     setError(null);
-    setSearchResults([]);
+    setSuccessMessage(null);
+    const query = titleSearchInput.trim().toLocaleLowerCase('cs');
+    const localResults = books.filter(book =>
+      book.title.toLocaleLowerCase('cs').includes(query) ||
+      book.authors.some(author => author.toLocaleLowerCase('cs').includes(query)) ||
+      book.isbn.includes(query)
+    );
+    setSearchResults(localResults);
+
+    if (!navigator.onLine) {
+      setIsTitleSearching(false);
+      if (localResults.length === 0) setError('Jste offline a v místním katalogu se nic nenašlo. Knihu můžete vložit ručně.');
+      return;
+    }
 
     try {
-      const results = await searchBooksByTitleOrAuthor(titleSearchInput);
-      if (results.length > 0) {
-        setSearchResults(results);
+      const onlineResults = await searchBooksByTitleOrAuthor(titleSearchInput);
+      const seen = new Set(localResults.map(book => `${book.title.toLocaleLowerCase('cs')}|${(book.authors || []).join(',').toLocaleLowerCase('cs')}`));
+      const mergedResults = [...localResults, ...onlineResults.filter(book => {
+        const key = `${(book.title || '').toLocaleLowerCase('cs')}|${(book.authors || []).join(',').toLocaleLowerCase('cs')}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })];
+
+      if (mergedResults.length > 0) {
+        setSearchResults(mergedResults);
       } else {
-        setError(`Pro dotaz "${titleSearchInput}" nebyly nalezeny žádné online výsledky. Můžete knihu vložit ručně.`);
+        setError(`Pro dotaz „${titleSearchInput}“ nebyly nalezeny žádné výsledky v katalogu ani online. Knihu můžete vložit ručně.`);
       }
     } catch {
-      setError('Chyba při online vyhledávání knih.');
+      if (localResults.length === 0) setError('Online katalogy nejsou právě dostupné. Zkontrolujte připojení nebo vložte knihu ručně.');
     } finally {
       setIsTitleSearching(false);
     }
@@ -361,6 +436,9 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onBookAdded, on
               <input
                 id="isbn"
                 type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                autoCapitalize="off"
                 value={isbnInput}
                 onChange={(e) => setIsbnInput(e.target.value)}
                 placeholder="např. 9788020719808..."
@@ -380,7 +458,7 @@ export const BookScanner: React.FC<BookScannerProps> = ({ books, onBookAdded, on
           {/* Form 2: Search online by Title or Author */}
           <form onSubmit={handleSearchByTitleOrAuthor} className="space-y-2 pt-1 border-t border-gray-100">
             <label htmlFor="titleSearch" className="block text-[10px] font-bold text-gray-600 uppercase tracking-wider">
-              2. Vyhledat knihu online podle názvu / autora
+              2. Vyhledat v katalogu a online podle názvu / autora
             </label>
             <div className="flex space-x-2">
               <input

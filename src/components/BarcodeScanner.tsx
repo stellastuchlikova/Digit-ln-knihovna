@@ -116,28 +116,53 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({ onScanSuccess, o
         if (!window.isSecureContext) throw new Error('insecure-context');
         scanner = new Html5Qrcode('reader', { formatsToSupport: BOOK_BARCODE_FORMATS, verbose: false });
         barcodeScannerRef.current = scanner;
-        // html5-qrcode accepts a facingMode string (or { exact }), not { ideal }.
-        // Passing { ideal } makes Safari reject the camera request before permission can be granted.
-        await scanner.start(
-          selectedCameraId || { facingMode },
-          {
-            fps: 18,
-            aspectRatio: 1.777,
-            disableFlip: true,
-            qrbox: (width, height) => {
-              const boxWidth = Math.min(Math.round(width * 0.88), 440);
-              const boxHeight = Math.min(Math.round(boxWidth * 0.46), Math.round(height * 0.72), 210);
-              return { width: boxWidth, height: Math.max(boxHeight, 90) };
+        // iOS Safari can open a live stream in its native video player (which is black)
+        // when playsinline is missing. html5-qrcode creates the <video> itself, so attach
+        // the iOS inline-playback attributes before its first play() call.
+        const videoPrototype = HTMLVideoElement.prototype;
+        const originalPlay = videoPrototype.play;
+        const inlinePlay = function (this: HTMLVideoElement) {
+          this.playsInline = true;
+          this.muted = true;
+          this.autoplay = true;
+          this.setAttribute('playsinline', 'true');
+          this.setAttribute('webkit-playsinline', 'true');
+          return originalPlay.call(this);
+        };
+        videoPrototype.play = inlinePlay;
+        try {
+          // html5-qrcode accepts a facingMode string (or { exact }), not { ideal }.
+          await scanner.start(
+            selectedCameraId || { facingMode },
+            {
+              fps: 18,
+              aspectRatio: 1.777,
+              disableFlip: true,
+              qrbox: (width, height) => {
+                const boxWidth = Math.min(Math.round(width * 0.88), 440);
+                const boxHeight = Math.min(Math.round(boxWidth * 0.46), Math.round(height * 0.72), 210);
+                return { width: boxWidth, height: Math.max(boxHeight, 90) };
+              }
+            },
+            (decodedText) => {
+              const isbn = getValidIsbn(decodedText);
+              if (isbn) handleValidIsbn(isbn);
+            },
+            () => {
+              // A frame without a barcode is expected while the camera is searching.
             }
-          },
-          (decodedText) => {
-            const isbn = getValidIsbn(decodedText);
-            if (isbn) handleValidIsbn(isbn);
-          },
-          () => {
-            // A frame without a barcode is expected while the camera is searching.
-          }
-        );
+          );
+        } finally {
+          if (videoPrototype.play === inlinePlay) videoPrototype.play = originalPlay;
+        }
+
+        // Keep these attributes applied after html5-qrcode mounts the video into the page.
+        const preview = document.querySelector<HTMLVideoElement>('#reader video');
+        if (preview) {
+          preview.playsInline = true;
+          preview.muted = true;
+          preview.setAttribute('webkit-playsinline', 'true');
+        }
         if (!cancelled) setIsCameraStarting(false);
 
         const capabilities = scanner.getRunningTrackCapabilities() as MediaTrackCapabilities & { torch?: boolean };

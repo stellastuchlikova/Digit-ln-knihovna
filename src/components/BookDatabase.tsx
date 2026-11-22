@@ -6,7 +6,7 @@ import { BookCover } from './BookCover';
 import { StarRating } from './StarRating';
 import {
   Search, Filter, LayoutGrid, List, CheckCircle2, XCircle,
-  Trash2, Eye, User, Tag, BookOpen, ArrowUpDown, Sparkles, Layers
+  Trash2, Eye, User, Tag, BookOpen, ArrowUpDown, Sparkles, Layers, X
 } from 'lucide-react';
 
 interface BookDatabaseProps {
@@ -76,11 +76,13 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
   const filteredBooks = useMemo(() => {
     return books.filter(book => {
       // Search text (matches title, author, or isbn)
-      const query = filters.searchQuery.toLowerCase().trim();
-      const matchesQuery = !query ||
-        book.title.toLowerCase().includes(query) ||
-        book.authors.some(a => a.toLowerCase().includes(query)) ||
-        book.isbn.toLowerCase().includes(query);
+      const normalize = (value: string) => value.toLocaleLowerCase('cs').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      const query = normalize(filters.searchQuery).trim();
+      const searchableText = normalize([
+        book.title, ...book.authors, book.isbn, book.publisher || '',
+        book.description || '', book.categories.join(' '), book.notes || ''
+      ].join(' '));
+      const matchesQuery = !query || query.split(/\s+/).every(term => searchableText.includes(term));
 
       // Category filter
       const matchesCategory = !filters.selectedCategory ||
@@ -164,6 +166,7 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
                   : 'text-gray-500 hover:text-gray-900'
               }`}
               title="Mřížka"
+              aria-label="Zobrazit knihy v mřížce"
             >
               <LayoutGrid className="w-4 h-4" />
             </button>
@@ -175,6 +178,7 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
                   : 'text-gray-500 hover:text-gray-900'
               }`}
               title="Tabulka"
+              aria-label="Zobrazit knihy v tabulce"
             >
               <List className="w-4 h-4" />
             </button>
@@ -260,9 +264,20 @@ export const BookDatabase: React.FC<BookDatabaseProps> = ({
             type="text"
             value={filters.searchQuery}
             onChange={(e) => setFilters({ ...filters, searchQuery: e.target.value })}
-            placeholder="Vyhledat podle názvu knihy, jména autora nebo ISBN kódu..."
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-xl text-sm text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-[#800020] focus:border-[#800020]"
+            placeholder="Hledej název, autora, ISBN, nakladatele nebo poznámku…"
+            aria-label="Hledat v knihovně"
+            className="w-full min-h-12 pl-10 pr-12 py-3 border border-gray-300 rounded-xl text-sm text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-[#800020] focus:border-[#800020]"
           />
+          {filters.searchQuery && (
+            <button
+              type="button"
+              onClick={() => setFilters({ ...filters, searchQuery: '' })}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-gray-500 hover:bg-gray-100"
+              aria-label="Vymazat hledání"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
         </div>
 
         {/* Filters Grid */}

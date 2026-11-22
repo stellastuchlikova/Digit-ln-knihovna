@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import type { Book, ActiveTab } from './types/book';
 import { getStoredBooks, saveBooks, enrichStoredBooksOnline } from './services/storage';
+import {
+  cloudSyncConfigured, getCloudSession, signInToCloud, signUpToCloud, signOutFromCloud,
+  fetchCloudBooks, saveCloudBooks, saveCloudDeletions, mergeCloudBooks,
+  markBookDeleted, restoreBook, type CloudSession
+} from './services/cloudSync';
 import { BookScanner } from './components/BookScanner';
 import { BookDatabase } from './components/BookDatabase';
 import { ImportExport } from './components/ImportExport';
@@ -15,6 +20,9 @@ export const App: React.FC = () => {
   const [books, setBooks] = useState<Book[]>(getStoredBooks);
   const [activeTab, setActiveTab] = useState<ActiveTab>('database');
   const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
+  const [cloudSession, setCloudSession] = useState<CloudSession | null>(() => getCloudSession());
+  const [cloudReady, setCloudReady] = useState(false);
+  const [cloudStatus, setCloudStatus] = useState('Pouze toto zařízení');
 
   // Background enrichment of stored books missing descriptions from Knihovny.cz / online
   useEffect(() => {
@@ -23,29 +31,145 @@ export const App: React.FC = () => {
     });
   }, []);
 
+  useEffect(() => {
+    if (!cloudSession) {
+      setCloudReady(false);
+      setCloudStatus(cloudSyncConfigured() ? 'Synchronizace vypnutá' : 'Pouze toto zařízení');
+      return;
+    }
+
+    let cancelled = false;
+    setCloudReady(false);
+    setCloudStatus('Připojuji knihovnu…');
+    const loadCloudLibrary = async () => {
+      try {
+        const rows = await fetchCloudBooks();
+        if (cancelled) return;
+        const merged = mergeCloudBooks(getStoredBooks(), rows);
+        saveBooks(merged);
+        setBooks(merged);
+        await saveCloudBooks(merged);
+        await saveCloudDeletions();
+        if (!cancelled) {
+          setCloudReady(true);
+          setCloudStatus('Synchronizováno');
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setCloudReady(false);
+          setCloudStatus(error instanceof Error ? error.message : 'Synchronizace se nezdařila');
+        }
+      }
+    };
+    void loadCloudLibrary();
+    return () => { cancelled = true; };
+  }, [cloudSession?.userId]);
+
+  useEffect(() => {
+    if (!cloudSession || !cloudReady) return;
+    let cancelled = false;
+    const sync = async () => {
+      try {
+        await saveCloudBooks(books);
+        await saveCloudDeletions();
+        if (!cancelled) setCloudStatus('Synchronizováno');
+      } catch {
+        if (!cancelled) setCloudStatus('Offline – změny se uloží po připojení');
+      }
+    };
+    void sync();
+
+    const refreshFromCloud = async () => {
+      try {
+        const rows = await fetchCloudBooks();
+        if (cancelled) return;
+        const current = getStoredBooks();
+        const merged = mergeCloudBooks(current, rows);
+        if (JSON.stringify(merged) !== JSON.stringify(current)) {
+          saveBooks(merged);
+          setBooks(merged);
+        }
+        await saveCloudBooks(merged);
+        await saveCloudDeletions();
+        if (!cancelled) setCloudStatus('Synchronizováno');
+      } catch {
+        if (!cancelled) setCloudStatus('Offline – změny se uloží po připojení');
+      }
+    };
+    const timer = window.setInterval(() => { void refreshFromCloud(); }, 20000);
+    const onOnline = () => { void refreshFromCloud(); };
+    window.addEventListener('online', onOnline);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener('online', onOnline);
+    };
+  }, [cloudSession?.userId, cloudReady, books]);
+
   const availableBooksCount = books.filter(b => b.isAvailable).length;
   const borrowedBooksCount = books.filter(b => !b.isAvailable).length;
 
   const handleBookAdded = (newBook: Book) => {
+    restoreBook(newBook.id);
     const updated = [newBook, ...books.filter(b => b.id !== newBook.id)];
     setBooks(updated);
     saveBooks(updated);
   };
 
   const handleBookUpdated = (updatedBook: Book) => {
+    restoreBook(updatedBook.id);
     const updated = books.map(b => (b.id === updatedBook.id ? updatedBook : b));
     setBooks(updated);
     saveBooks(updated);
   };
 
   const handleBookDeleted = (id: string) => {
+    markBookDeleted(id);
     const updated = books.filter(b => b.id !== id);
     setBooks(updated);
     saveBooks(updated);
   };
 
   const handleBooksImported = (importedBooks: Book[]) => {
+    importedBooks.forEach(book => restoreBook(book.id));
     setBooks(importedBooks);
+    saveBooks(importedBooks);
+  };
+
+  const handleCloudAuth = async (email: string, password: string, mode: 'login' | 'register') => {
+    setCloudStatus('Přihlašuji…');
+    const session = mode === 'login'
+      ? await signInToCloud(email, password)
+      : await signUpToCloud(email, password);
+    if (session) {
+      setCloudSession(session);
+      setCloudStatus('Připojuji knihovnu…');
+      return 'Účet je připraven. Knihovna se právě synchronizuje.';
+    }
+    return 'Účet byl vytvořen. Potvrď e-mail a potom se přihlas.';
+  };
+
+  const handleCloudLogout = async () => {
+    await signOutFromCloud();
+    setCloudSession(null);
+    setCloudStatus('Pouze toto zařízení');
+  };
+
+  const handleCloudSyncNow = async () => {
+    if (!cloudSession) return;
+    setCloudStatus('Synchronizuji…');
+    try {
+      const rows = await fetchCloudBooks();
+      const merged = mergeCloudBooks(getStoredBooks(), rows);
+      saveBooks(merged);
+      setBooks(merged);
+      await saveCloudBooks(merged);
+      await saveCloudDeletions();
+      setCloudReady(true);
+      setCloudStatus('Synchronizováno');
+    } catch (error) {
+      setCloudStatus(error instanceof Error ? error.message : 'Synchronizace se nezdařila');
+    }
   };
 
   const menuItems = [
@@ -304,7 +428,16 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'import-export' && (
-          <ImportExport books={books} onBooksImported={handleBooksImported} />
+          <ImportExport
+            books={books}
+            onBooksImported={handleBooksImported}
+            cloudEnabled={cloudSyncConfigured()}
+            cloudEmail={cloudSession?.email ?? null}
+            cloudStatus={cloudStatus}
+            onCloudAuth={handleCloudAuth}
+            onCloudLogout={handleCloudLogout}
+            onCloudSyncNow={handleCloudSyncNow}
+          />
         )}
       </main>
 
@@ -349,7 +482,7 @@ export const App: React.FC = () => {
           <p>© {CURRENT_YEAR} Aplikace na čtení a evidenci knih v knihovně</p>
           <div className="flex items-center space-x-4">
             <span className="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
-            <span>Systém připraven</span>
+            <span>{cloudStatus}</span>
           </div>
         </div>
       </footer>

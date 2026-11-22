@@ -1,32 +1,24 @@
-# React + TypeScript + Vite
+# Digitální knihovna
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Aplikace pro skenování ISBN, vyhledávání a správu katalogu knih. Bez přihlášení pracuje lokálně v prohlížeči; volitelná synchronizace přenáší knihy mezi zařízeními přes Supabase.
 
-Currently, two official plugins are available:
+## Zapnutí synchronizace mezi zařízeními
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+1. V Supabase vytvoř projekt.
+2. V SQL Editoru spusť obsah souboru `supabase/schema.sql`.
+3. V Supabase Authentication povol e-mailové účty. Potvrzení e-mailu může zůstat zapnuté; po registraci nejdřív potvrď e-mail.
+4. V Supabase Project Settings → API zkopíruj Project URL a veřejný `anon` / publishable klíč.
+5. V GitHub repozitáři otevři Settings → Secrets and variables → Actions a přidej:
+   - `VITE_SUPABASE_URL` = Project URL
+   - `VITE_SUPABASE_ANON_KEY` = veřejný `anon` / publishable klíč
+6. V Actions spusť workflow „Deploy to GitHub Pages“ přes Run workflow (nebo odešli commit do `main`).
+7. Otevři aplikaci na každém zařízení, vytvoř jeden účet a přihlas se stejným e-mailem a heslem.
 
-## React Compiler
+Veřejný anon/publishable klíč je určený pro klientskou aplikaci a oprávnění uživatele omezují RLS pravidla. Nikdy nevkládej service_role ani secret key do aplikace. Každý účet vidí jen svůj vlastní katalog.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Vývoj
 
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```sh
+npm ci
+npm run dev
 ```
-
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.

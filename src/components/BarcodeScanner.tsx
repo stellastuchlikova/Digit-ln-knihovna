@@ -31,18 +31,25 @@ function getValidIsbn(candidate: string): string | null {
 }
 
 function cameraErrorMessage(error: unknown): string {
-  const name = error instanceof DOMException ? error.name : '';
+  const errorName = error && typeof error === 'object' && 'name' in error ? String(error.name) : '';
+  const errorText = `${errorName} ${error instanceof Error ? error.message : String(error)}`.toLowerCase();
+  const isIPhone = /iphone|ipad|ipod/i.test(navigator.userAgent);
   if (!window.isSecureContext) {
     return 'Pro přístup ke kameře otevřete aplikaci přes zabezpečený odkaz HTTPS.';
   }
   if (!navigator.mediaDevices?.getUserMedia) {
     return 'Tento prohlížeč nepodporuje přístup ke kameře. Použijte fotku čárového kódu nebo zadejte ISBN ručně.';
   }
-  if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-    return 'Prohlížeč nemá povolený přístup ke kameře. Povolte kameru v nastavení webu a zkuste to znovu.';
+  if (['notallowederror', 'permissiondeniederror', 'permission denied', 'permission dismissed'].some(text => errorText.includes(text))) {
+    return isIPhone
+      ? 'Safari blokuje kameru. V Safari otevřete nabídku stránky vedle adresy → Nastavení webu → Kamera → Povolit. Pak stránku obnovte. Případně zkontrolujte Nastavení iPhonu → Aplikace → Safari → Kamera.'
+      : 'Prohlížeč nemá povolený přístup ke kameře. Povolte kameru v nastavení tohoto webu a stránku obnovte.';
   }
-  if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+  if (['notfounderror', 'devicesnotfounderror'].some(text => errorText.includes(text))) {
     return 'Kamera nebyla nalezena. Můžete načíst fotku kódu nebo zadat ISBN ručně.';
+  }
+  if (['notreadableerror', 'trackstart', 'could not start video source'].some(text => errorText.includes(text))) {
+    return 'Kamera je právě používána jinou aplikací nebo se ji nepodařilo spustit. Zavřete aplikaci Fotoaparát, vraťte se sem a zkuste to znovu.';
   }
   return 'Kameru se nepodařilo spustit. Zkuste ji povolit v prohlížeči, načíst fotku kódu nebo zadat ISBN ručně.';
 }
@@ -54,6 +61,9 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({ onScanSuccess, o
   const [ocrStatus, setOcrStatus] = useState('');
   const [scannerError, setScannerError] = useState<string | null>(null);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
+  const [availableCameras, setAvailableCameras] = useState<Array<{ id: string; label: string }>>([]);
+  const [selectedCameraId, setSelectedCameraId] = useState('');
+  const [activeCameraId, setActiveCameraId] = useState('');
   const [torchOn, setTorchOn] = useState(false);
   const [hasTorch, setHasTorch] = useState(false);
 
@@ -103,8 +113,10 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({ onScanSuccess, o
         if (!window.isSecureContext) throw new Error('insecure-context');
         scanner = new Html5Qrcode('reader', { formatsToSupport: BOOK_BARCODE_FORMATS, verbose: false });
         barcodeScannerRef.current = scanner;
+        // html5-qrcode accepts a facingMode string (or { exact }), not { ideal }.
+        // Passing { ideal } makes Safari reject the camera request before permission can be granted.
         await scanner.start(
-          { facingMode: { ideal: facingMode } },
+          selectedCameraId || { facingMode },
           {
             fps: 18,
             aspectRatio: 1.777,
@@ -126,6 +138,14 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({ onScanSuccess, o
 
         const capabilities = scanner.getRunningTrackCapabilities() as MediaTrackCapabilities & { torch?: boolean };
         setHasTorch(Boolean(capabilities?.torch));
+        try {
+          const settings = scanner.getRunningTrackSettings();
+          if (!cancelled) setActiveCameraId(settings.deviceId || selectedCameraId);
+          const cameras = await Html5Qrcode.getCameras();
+          if (!cancelled) setAvailableCameras(cameras.map(camera => ({ id: camera.id, label: camera.label })));
+        } catch {
+          // Camera labels are optional in Safari; scanning should continue without them.
+        }
 
         if (cancelled && scanner.isScanning) await scanner.stop();
       } catch (error) {
@@ -152,7 +172,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({ onScanSuccess, o
       }
       if (barcodeScannerRef.current === scanner) barcodeScannerRef.current = null;
     };
-  }, [scannerStarted, scanMode, facingMode, handleValidIsbn, reportError]);
+  }, [scannerStarted, scanMode, facingMode, selectedCameraId, handleValidIsbn, reportError]);
 
   // Separate camera stream for reading ISBN text when a barcode is unavailable.
   useEffect(() => {
@@ -216,7 +236,10 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({ onScanSuccess, o
     }
   };
 
-  const toggleCamera = () => setFacingMode(current => current === 'environment' ? 'user' : 'environment');
+  const toggleCamera = () => {
+    setSelectedCameraId('');
+    setFacingMode(current => current === 'environment' ? 'user' : 'environment');
+  };
 
   const recognizeImageText = async (image: File | HTMLCanvasElement): Promise<string | null> => {
     const { createWorker } = await import('tesseract.js');
@@ -370,6 +393,22 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({ onScanSuccess, o
               {scanMode === 'barcode' ? 'Hledám čárový kód…' : 'Kamera pro vytištěné ISBN'}
             </span>
             <div className="flex items-center gap-2">
+              {scanMode === 'barcode' && availableCameras.length > 1 && (
+                <label className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700">
+                  <Camera className="h-3.5 w-3.5" />
+                  <span className="sr-only">Vyberte kameru</span>
+                  <select
+                    aria-label="Vyberte kameru"
+                    value={selectedCameraId || activeCameraId}
+                    onChange={event => { setSelectedCameraId(event.target.value); setScannerError(null); }}
+                    className="max-w-[130px] bg-transparent text-xs outline-none"
+                  >
+                    {availableCameras.map((camera, index) => (
+                      <option key={camera.id} value={camera.id}>{camera.label || `Kamera ${index + 1}`}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
               {hasTorch && (
                 <button type="button" onClick={toggleTorch} className={`p-2 rounded-lg border ${torchOn ? 'bg-amber-100 text-amber-900 border-amber-300' : 'bg-gray-100 text-gray-600 border-gray-200'}`} title="Svítilna">
                   <Flashlight className="w-4 h-4" />

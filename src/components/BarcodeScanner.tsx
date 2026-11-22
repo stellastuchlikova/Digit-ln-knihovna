@@ -55,7 +55,9 @@ function cameraErrorMessage(error: unknown): string {
 }
 
 export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({ onScanSuccess, onScanError }) => {
-  const [scannerStarted, setScannerStarted] = useState(false);
+  // The scanner mounts only when the user opens the scanner tab, so start the camera then.
+  const [scannerStarted, setScannerStarted] = useState(true);
+  const [isCameraStarting, setIsCameraStarting] = useState(false);
   const [scanMode, setScanMode] = useState<ScanMode>('barcode');
   const [isOcrProcessing, setIsOcrProcessing] = useState(false);
   const [ocrStatus, setOcrStatus] = useState('');
@@ -107,6 +109,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({ onScanSuccess, o
     setScannerError(null);
     setHasTorch(false);
     setTorchOn(false);
+    setIsCameraStarting(true);
 
     const startScanner = async () => {
       try {
@@ -135,6 +138,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({ onScanSuccess, o
             // A frame without a barcode is expected while the camera is searching.
           }
         );
+        if (!cancelled) setIsCameraStarting(false);
 
         const capabilities = scanner.getRunningTrackCapabilities() as MediaTrackCapabilities & { torch?: boolean };
         setHasTorch(Boolean(capabilities?.torch));
@@ -150,6 +154,7 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({ onScanSuccess, o
         if (cancelled && scanner.isScanning) await scanner.stop();
       } catch (error) {
         if (!cancelled) {
+          setIsCameraStarting(false);
           setScannerStarted(false);
           reportError(cameraErrorMessage(error));
         }
@@ -424,6 +429,11 @@ export const BarcodeScanner: React.FC<BarcodeScannerProps> = ({ onScanSuccess, o
           {scanMode === 'barcode' ? (
             <div className="relative overflow-hidden rounded-xl bg-black">
               <div id="reader" className="w-full min-h-[220px] sm:min-h-[280px]" />
+                {isCameraStarting && !scannerError && <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-slate-950/90 p-6 text-white">
+                  <Loader2 className="h-8 w-8 animate-spin text-rose-300" />
+                  <p className="text-sm font-semibold">Připojuji zadní kameru…</p>
+                  <p className="text-xs text-center text-white/75">Po zobrazení výzvy povol přístup ke kameře v Safari.</p>
+                </div>}
               {scannerError && <div className="absolute inset-0 bg-white/95 flex flex-col items-center justify-center gap-3 p-5">
                 <p className="text-sm text-amber-900 font-medium">{scannerError}</p>
                 <button type="button" onClick={() => { scanHandledRef.current = false; setScannerError(null); setScannerStarted(false); window.setTimeout(() => setScannerStarted(true), 0); }} className="px-4 py-2 bg-[#800020] text-white rounded-lg text-sm font-bold flex items-center gap-2"><RefreshCw className="w-4 h-4" />Zkusit znovu</button>
